@@ -201,9 +201,7 @@ class SummarizationAgent:
                 "- Major business developments\n"
                 "- Risks and challenges\n"
                 "- Strategic initiatives\n"
-                "- Market position\n"
-                "- Revenue and growth\n"
-                "- Operational highlights\n"
+                "- Market Position and Operational highlights\n"
                 "- Future outlook\n"
                 "- Competitive landscape\n\n"
                 f"Content:\n{chunk}\n\n"
@@ -216,7 +214,7 @@ class SummarizationAgent:
                     {"role": "system", "content": "You are a financial analyst."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=1024,
+                max_tokens=1500,
                 temperature=0.5,
             )
             chunk_elapsed = time.time() - chunk_start
