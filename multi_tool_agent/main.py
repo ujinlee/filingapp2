@@ -15,7 +15,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # local React dev
-        "https://front2.vercel.app"  # actual deployed Vercel frontend
+        "https://front2.vercel.app",  # old Vercel frontend
+        "https://front2-zeta.vercel.app",  # new Vercel frontend
+        "https://filingapp.onrender.com"  # render.com backend
     ],
     allow_credentials=True,
     allow_methods=["*"],
