@@ -16,3 +16,4 @@ lxml==4.9.3
 pydub==0.25.1
 inflect
 google-cloud-translate
+openai

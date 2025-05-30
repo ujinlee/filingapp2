@@ -7,7 +7,7 @@ This application converts SEC filings (10-K and 10-Q) into concise, engaging pod
 - Convert SEC filings into 10-minute podcast summaries
 - Support for multiple languages (English, Spanish, Korean, Japanese, Chinese)
 - Modern web interface
-- Powered by Google's Gemini AI for intelligent summarization
+- Powered by OpenAI's GPT-3.5 for intelligent summarization
 - High-quality text-to-speech conversion
 
 ## Prerequisites
@@ -15,7 +15,7 @@ This application converts SEC filings (10-K and 10-Q) into concise, engaging pod
 - Python 3.8+
 - Node.js 14+
 - Google Cloud account with the following APIs enabled:
-  - Gemini API
+  - OpenAI API
   - Cloud Text-to-Speech API
   - Cloud Translation API
 
@@ -76,7 +76,7 @@ The application consists of three main components:
 
 1. **Frontend**: React-based web interface with Material-UI components
 2. **Backend**: FastAPI server handling API requests and processing
-3. **AI Services**: Integration with Google's Gemini AI for summarization and translation
+3. **AI Services**: Integration with OpenAI's GPT-3.5 for summarization and translation
 
 ## Contributing
 

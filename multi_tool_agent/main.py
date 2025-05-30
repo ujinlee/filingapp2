@@ -15,7 +15,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # local React dev
-        "https://your-vercel-domain.vercel.app"  # replace with your actual Vercel domain
+        "https://front2.vercel.app"  # actual deployed Vercel frontend
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -55,11 +55,11 @@ async def summarize_filing(request: SummarizeRequest):
         if not content or len(content) < 100:
             raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
 
-        # 2. Summarize with Gemini
+        # 2. Summarize with GPT-3.5
         try:
             summary = SummarizationAgent.summarize(content)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Gemini summarization failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
 
         # 3. Translate
         try:

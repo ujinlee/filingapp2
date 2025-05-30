@@ -15,10 +15,14 @@ from concurrent.futures import ThreadPoolExecutor
 from google.cloud import translate_v2 as translate
 import html
 import inflect
+import openai
 
 SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPENAI_API_KEY
 
 # Use absolute path for audio directory
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
@@ -92,13 +96,11 @@ class SECAgent:
         cik = SECAgent.get_cik_from_ticker(ticker)
         if not cik:
             return None, f"CIK not found for ticker {ticker}"
-            
         url = f"https://data.sec.gov/submissions/CIK{cik}.json"
         headers = {
             "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
             "Accept-Encoding": "gzip, deflate"
         }
-        
         try:
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
@@ -130,14 +132,10 @@ class SECAgent:
             "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
             "Accept-Encoding": "gzip, deflate"
         }
-        
-        # Add retry logic
         max_retries = 3
         retry_delay = 2  # seconds
-        
         for attempt in range(max_retries):
             try:
-                # First, try to resolve the domain
                 import socket
                 domain = "www.sec.gov"
                 try:
@@ -149,22 +147,16 @@ class SECAgent:
                         time.sleep(retry_delay)
                         continue
                     return None, f"Could not resolve SEC domain: {str(e)}"
-                
-                # If DNS resolution succeeds, try to fetch the document
                 response = requests.get(document_url, headers=headers, timeout=30)
                 response.raise_for_status()
-                
                 soup = BeautifulSoup(response.text, 'html.parser')
                 content = soup.get_text()
                 content = re.sub(r'\s+', ' ', content)
                 content = re.sub(r'[^\w\s.,;:!?()-]', '', content)
                 content = content.strip()
-                
                 if not content or len(content) < 100:
                     return None, "Filing content is empty or too short"
-                    
                 return content, None
-                
             except requests.exceptions.RequestException as e:
                 print(f"Error fetching document (attempt {attempt + 1}/{max_retries}): {str(e)}")
                 if attempt < max_retries - 1:
@@ -178,15 +170,10 @@ class SummarizationAgent:
     @staticmethod
     def summarize(content: str) -> str:
         start_time = time.time()
-        model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
-        
         # Split content into chunks for faster processing
-        max_chunk_size = 10000  # Characters per chunk
+        max_chunk_size = 5000
         chunks = [content[i:i + max_chunk_size] for i in range(0, len(content), max_chunk_size)]
-        
-        # Process chunks in parallel
-        summaries = []
-        for chunk in chunks:
+        def summarize_chunk(chunk):
             prompt = (
                 "Extract key points from this section of an SEC filing. Focus on:\n"
                 "- Financial metrics and performance\n"
@@ -197,14 +184,26 @@ class SummarizationAgent:
                 "- Revenue and growth\n"
                 "- Operational highlights\n"
                 "- Future outlook\n"
-                "- Competitive landscape\n"
-                "- Regulatory matters\n\n"
+                "- Competitive landscape\n\n"
                 f"Content:\n{chunk}\n\n"
                 "Key Points:"
             )
-            response = model.generate_content(prompt)
-            summaries.append(response.text)
-        
+            chunk_start = time.time()
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a financial analyst."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1024,
+                temperature=0.5,
+            )
+            chunk_elapsed = time.time() - chunk_start
+            print(f"[Timing] Chunk summarization took {chunk_elapsed:.2f} seconds")
+            return response['choices'][0]['message']['content']
+        # Process chunks in parallel
+        with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as executor:
+            summaries = list(executor.map(summarize_chunk, chunks))
         # Combine summaries and create podcast script
         combined_summary = "\n".join(summaries)
         podcast_prompt = (
@@ -224,9 +223,16 @@ class SummarizationAgent:
             f"Key Points:\n{combined_summary}\n\n"
             "Podcast Script:"
         )
-        gemini_response = model.generate_content(podcast_prompt)
-        script = gemini_response.text.strip()
-        
+        gpt_response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a financial analyst."},
+                {"role": "user", "content": podcast_prompt}
+            ],
+            max_tokens=2048,
+            temperature=0.5,
+        )
+        script = gpt_response['choices'][0]['message']['content'].strip()
         # Validate and fix the script format
         lines = script.split('\n')
         formatted_lines = []
@@ -235,45 +241,34 @@ class SummarizationAgent:
             if not line:
                 continue
             if not (line.startswith('ALEX:') or line.startswith('JAMIE:')):
-                # If line doesn't start with a speaker tag, add it to the previous line
                 if formatted_lines:
                     formatted_lines[-1] = formatted_lines[-1] + ' ' + line
                 else:
-                    # If this is the first line, assume it's Alex speaking
                     formatted_lines.append('ALEX: ' + line)
             else:
                 formatted_lines.append(line)
-        
         summary = '\n'.join(formatted_lines)
         summary = html.unescape(summary)
         elapsed = time.time() - start_time
-        print(f"[Timing] Summarization took {elapsed:.2f} seconds")
+        print(f"[Timing] Summarization (all chunks + final) took {elapsed:.2f} seconds")
         return summary
 
 class TranslationAgent:
-    # Cache for translations to avoid re-translating the same content
     _translation_cache = {}
-    
     @staticmethod
     def translate(english_script: str, target_language: str) -> str:
         start_time = time.time()
         if target_language == "en-US":
             return english_script
-            
-        # Check cache first
         cache_key = f"{hash(english_script)}_{target_language}"
         if cache_key in TranslationAgent._translation_cache:
             return TranslationAgent._translation_cache[cache_key]
-            
-        model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
-        
-        # Split script into optimal blocks for parallel processing
+        # Split script into blocks for parallel processing
         blocks = []
         current_block = []
         current_speaker = None
         block_size = 0
-        max_block_size = 8000  # Increased block size for fewer API calls
-        
+        max_block_size = 8000
         for line in english_script.split('\n'):
             line = line.strip()
             if not line:
@@ -289,10 +284,8 @@ class TranslationAgent:
             else:
                 current_block.append(line)
                 block_size += len(line)
-                
         if current_block:
             blocks.append((current_speaker, '\n'.join(current_block)))
-            
         def translate_block(args):
             speaker, block = args
             prompt = (
@@ -303,10 +296,16 @@ class TranslationAgent:
                 f"Return only the translated script, with each line starting with the correct speaker tag.\n\n"
                 f"{block}"
             )
-            response = model.generate_content(prompt)
-            translated_text = response.text.strip()
-            
-            # Validate and fix the translation format
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": f"You are a professional translator to {target_language}."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=2048,
+                temperature=0.5,
+            )
+            translated_text = response['choices'][0]['message']['content'].strip()
             lines = translated_text.split('\n')
             formatted_lines = []
             for line in lines:
@@ -314,58 +313,22 @@ class TranslationAgent:
                 if not line:
                     continue
                 if not (line.startswith('ALEX:') or line.startswith('JAMIE:')):
-                    # If line doesn't start with a speaker tag, add it to the previous line
                     if formatted_lines:
                         formatted_lines[-1] = formatted_lines[-1] + ' ' + line
                     else:
-                        # If this is the first line, assume it's the same speaker as the block
                         formatted_lines.append(f'{speaker}: ' + line)
                 else:
                     formatted_lines.append(line)
-            
             return '\n'.join(formatted_lines)
-            
-        # Use ThreadPoolExecutor for parallel translation
         with ThreadPoolExecutor(max_workers=min(len(blocks), 4)) as executor:
             translated_blocks = list(executor.map(translate_block, blocks))
-            
         result = '\n\n'.join(translated_blocks)
         result = html.unescape(result)
-        
-        # Post-processing: Ensure both ALEX: and JAMIE: are present and script is not too short
         num_alex = result.count('ALEX:')
         num_jamie = result.count('JAMIE:')
         if num_alex < 2 or num_jamie < 2 or len(result) < 100:
-            print(f"[TranslationAgent] Gemini translation failed, trying Google Translate API fallback.")
-            # Fallback: Use Google Cloud Translate line-by-line
-            translate_client = translate.Client()
-            translated_lines = []
-            for line in english_script.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith('ALEX:') or line.startswith('JAMIE:'):
-                    tag, text = line.split(':', 1)
-                    try:
-                        translated = translate_client.translate(
-                            text.strip(),
-                            target_language=target_language.split('-')[0]
-                        )['translatedText']
-                        translated_lines.append(f'{tag}: {translated}')
-                    except Exception as e:
-                        print(f'[TranslationAgent] Google Translate API error: {e}')
-                        translated_lines.append(line)
-                else:
-                    translated_lines.append(line)
-            result = '\n'.join(translated_lines)
-            # Re-check if fallback succeeded
-            num_alex = result.count('ALEX:')
-            num_jamie = result.count('JAMIE:')
-            if num_alex < 2 or num_jamie < 2 or len(result) < 100:
-                print(f'[TranslationAgent] Google Translate fallback also failed, using English.')
-                result = english_script
-        
-        # Cache the result
+            print(f"[TranslationAgent] GPT translation failed, using English.")
+            result = english_script
         TranslationAgent._translation_cache[cache_key] = result
         elapsed = time.time() - start_time
         print(f"[Timing] Translation to {target_language} took {elapsed:.2f} seconds")
