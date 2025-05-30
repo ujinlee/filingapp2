@@ -319,7 +319,7 @@ class TranslationAgent:
                 f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
                 f"{block}"
             )
-            print(f"[TranslationAgent] Sending prompt to OpenAI for {target_language}:\n{prompt}\n---")
+            print(f"[TranslationAgent] Starting translation for {target_language}.")
             response = openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -330,7 +330,7 @@ class TranslationAgent:
                 temperature=0.5,
             )
             translated_text = response.choices[0].message.content.strip()
-            print(f"[TranslationAgent] OpenAI response for {target_language}:\n{translated_text}\n---")
+            print(f"[TranslationAgent] Translation complete for {target_language}.")
 
             # Process the translated text to ensure proper formatting
             lines = translated_text.split('\n')
@@ -357,7 +357,7 @@ class TranslationAgent:
         result = '\n\n'.join(translated_blocks)
         result = html.unescape(result)
 
-        print(f"[TranslationAgent] FINAL TRANSLATION RESULT for {target_language}:\n{result}\n---")
+        print(f"[TranslationAgent] FINAL TRANSLATION RESULT for {target_language}: [content omitted for brevity]")
 
         # Only fall back to English if the result is empty
         if not result.strip():
