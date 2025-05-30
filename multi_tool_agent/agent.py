@@ -222,7 +222,7 @@ class SummarizationAgent:
         # Combine summaries and create podcast script
         combined_summary = "\n".join(summaries)
         podcast_prompt = (
-            Create a detailed 3-4 minute podcast script from these key points. "
+            "Create a detailed 3-4 minute podcast script from these key points. "
             "The script must always start with: 'Welcome to our FilingTalk, where we break down the latest in financial filings.'\n"
             "Format as a natural conversation between Alex and Jamie where:\n"
             "- Alex asks focused questions about the most important developments\n"
