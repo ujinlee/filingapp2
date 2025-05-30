@@ -102,7 +102,22 @@ function App() {
             <label htmlFor="ticker" style={{ color: "#fff", fontWeight: 500, fontSize: 16 }}>Stock Ticker</label>
             <input
               id="ticker"
-              style={{ width: "100%", padding: 14, borderRadius: 8, border: `1.5px solid ${border}`, background: "#1a1c2c", color: "#fff", fontSize: 18, marginTop: 8, marginBottom: 18, fontFamily }}
+              style={{
+                width: "100%",
+                padding: "14px 18px",
+                borderRadius: 10,
+                border: `1.5px solid ${border}`,
+                background: "#1a1c2c",
+                color: "#fff",
+                fontSize: 18,
+                marginTop: 8,
+                marginBottom: 18,
+                fontFamily,
+                boxSizing: "border-box",
+                height: 52,
+                lineHeight: 1.2,
+                fontWeight: 500,
+              }}
               value={ticker}
               onChange={(e) => setTicker(e.target.value)}
               placeholder="e.g. AAPL, GOOG, MSFT"

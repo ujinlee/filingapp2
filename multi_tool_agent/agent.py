@@ -266,48 +266,51 @@ class TranslationAgent:
         if cache_key in TranslationAgent._translation_cache:
             return TranslationAgent._translation_cache[cache_key]
 
-        # Split script into blocks for parallel processing
-        blocks = []
-        current_block = []
-        current_speaker = None
-        block_size = 0
+        # Always send the entire script as a single block unless extremely long
         max_block_size = 8000
-
-        # First, split the script into speaker blocks
-        for line in english_script.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith('ALEX:') or line.startswith('JAMIE:'):
-                if current_block and block_size >= max_block_size:
-                    blocks.append((current_speaker, '\n'.join(current_block)))
-                    current_block = []
-                    block_size = 0
-                current_speaker = line.split(':')[0]
-                current_block = [line]
-                block_size = len(line)
-            else:
-                current_block.append(line)
-                block_size += len(line)
-        if current_block:
-            blocks.append((current_speaker, '\n'.join(current_block)))
+        script_lines = english_script.split('\n')
+        script_length = sum(len(line) for line in script_lines)
+        if script_length < max_block_size:
+            blocks = [(None, english_script)]
+        else:
+            # Fallback to old splitting logic for very long scripts
+            blocks = []
+            current_block = []
+            current_speaker = None
+            block_size = 0
+            for line in script_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('ALEX:') or line.startswith('JAMIE:'):
+                    if current_block and block_size >= max_block_size:
+                        blocks.append((current_speaker, '\n'.join(current_block)))
+                        current_block = []
+                        block_size = 0
+                    current_speaker = line.split(':')[0]
+                    current_block = [line]
+                    block_size = len(line)
+                else:
+                    current_block.append(line)
+                    block_size += len(line)
+            if current_block:
+                blocks.append((current_speaker, '\n'.join(current_block)))
 
         def translate_block(args):
             speaker, block = args
             prompt = (
-                f"Translate the following podcast script to {target_language}. "
+                f"Translate the entire following podcast script to {target_language}. "
                 f"Make the conversation sound natural and idiomatic in {target_language}, as if two native speakers are discussing the topic. "
                 f"Adapt expressions and flow for naturalness, not just literal translation. "
-                f"IMPORTANT: Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
-                f"Do not modify or remove the speaker tags. "
-                f"Return the complete translated script with all lines preserved.\n\n"
+                f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
+                f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
                 f"{block}"
             )
             print(f"[TranslationAgent] Sending prompt to OpenAI for {target_language}:\n{prompt}\n---")
             response = openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": f"You are a professional translator to {target_language}. Always preserve the speaker tags (ALEX: and JAMIE:) exactly as they appear."},
+                    {"role": "system", "content": f"You are a professional translator to {target_language}. Always preserve the speaker tags (ALEX: and JAMIE:) exactly as they appear. Translate the entire script, do not skip any part."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=2048,
@@ -325,38 +328,28 @@ class TranslationAgent:
                 line = line.strip()
                 if not line:
                     continue
-                
-                # Check if line starts with a speaker tag
                 if line.startswith('ALEX:') or line.startswith('JAMIE:'):
                     current_speaker = line.split(':')[0]
                     formatted_lines.append(line)
                 else:
-                    # If no speaker tag, append to previous line if it exists
                     if formatted_lines:
                         formatted_lines[-1] = formatted_lines[-1] + ' ' + line
                     else:
-                        # If no previous line, add the speaker tag
-                        formatted_lines.append(f'{speaker}: {line}')
-
+                        formatted_lines.append(f'{speaker or "ALEX"}: {line}')
             return '\n'.join(formatted_lines)
 
-        # Process blocks in parallel
         with ThreadPoolExecutor(max_workers=min(len(blocks), 4)) as executor:
             translated_blocks = list(executor.map(translate_block, blocks))
 
-        # Join all translated blocks
         result = '\n\n'.join(translated_blocks)
         result = html.unescape(result)
 
-        # Validate the translation
-        num_alex = result.count('ALEX:')
-        num_jamie = result.count('JAMIE:')
-        
+        print(f"[TranslationAgent] FINAL TRANSLATION RESULT for {target_language}:\n{result}\n---")
+
+        # Only fall back to English if the result is empty
         if not result.strip():
             print(f"[TranslationAgent] GPT translation failed (empty result), using English.")
             result = english_script
-        elif num_alex < 2 or num_jamie < 2 or len(result) < 100:
-            print(f"[TranslationAgent] Warning: Translation may be incomplete or too short. Returning as-is.\nResult:\n{result}\n---")
 
         TranslationAgent._translation_cache[cache_key] = result
         elapsed = time.time() - start_time
