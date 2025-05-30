@@ -270,7 +270,7 @@ class TranslationAgent:
         current_block = []
         current_speaker = None
         block_size = 0
-        max_block_size = 8000
+        max_block_size = 2000
         for line in english_script.split('\n'):
             line = line.strip()
             if not line:
