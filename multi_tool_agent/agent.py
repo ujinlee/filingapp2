@@ -265,12 +265,15 @@ class TranslationAgent:
         cache_key = f"{hash(english_script)}_{target_language}"
         if cache_key in TranslationAgent._translation_cache:
             return TranslationAgent._translation_cache[cache_key]
+
         # Split script into blocks for parallel processing
         blocks = []
         current_block = []
         current_speaker = None
         block_size = 0
         max_block_size = 8000
+
+        # First, split the script into speaker blocks
         for line in english_script.split('\n'):
             line = line.strip()
             if not line:
@@ -288,51 +291,73 @@ class TranslationAgent:
                 block_size += len(line)
         if current_block:
             blocks.append((current_speaker, '\n'.join(current_block)))
+
         def translate_block(args):
             speaker, block = args
             prompt = (
                 f"Translate the following podcast script to {target_language}. "
                 f"Make the conversation sound natural and idiomatic in {target_language}, as if two native speakers are discussing the topic. "
                 f"Adapt expressions and flow for naturalness, not just literal translation. "
-                f"Preserve the dialogue structure and keep the speaker tags (ALEX: and JAMIE:) at the start of each line. "
-                f"Return only the translated script, with each line starting with the correct speaker tag.\n\n"
+                f"IMPORTANT: Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
+                f"Do not modify or remove the speaker tags. "
+                f"Return the complete translated script with all lines preserved.\n\n"
                 f"{block}"
             )
+            print(f"[TranslationAgent] Sending prompt to OpenAI for {target_language}:\n{prompt}\n---")
             response = openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": f"You are a professional translator to {target_language}."},
+                    {"role": "system", "content": f"You are a professional translator to {target_language}. Always preserve the speaker tags (ALEX: and JAMIE:) exactly as they appear."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=2048,
                 temperature=0.5,
             )
             translated_text = response.choices[0].message.content.strip()
+            print(f"[TranslationAgent] OpenAI response for {target_language}:\n{translated_text}\n---")
+
+            # Process the translated text to ensure proper formatting
             lines = translated_text.split('\n')
             formatted_lines = []
+            current_speaker = None
+
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
-                if not (line.startswith('ALEX:') or line.startswith('JAMIE:')):
+                
+                # Check if line starts with a speaker tag
+                if line.startswith('ALEX:') or line.startswith('JAMIE:'):
+                    current_speaker = line.split(':')[0]
+                    formatted_lines.append(line)
+                else:
+                    # If no speaker tag, append to previous line if it exists
                     if formatted_lines:
                         formatted_lines[-1] = formatted_lines[-1] + ' ' + line
                     else:
-                        formatted_lines.append(f'{speaker}: ' + line)
-                else:
-                    formatted_lines.append(line)
+                        # If no previous line, add the speaker tag
+                        formatted_lines.append(f'{speaker}: {line}')
+
             return '\n'.join(formatted_lines)
+
+        # Process blocks in parallel
         with ThreadPoolExecutor(max_workers=min(len(blocks), 4)) as executor:
             translated_blocks = list(executor.map(translate_block, blocks))
+
+        # Join all translated blocks
         result = '\n\n'.join(translated_blocks)
         result = html.unescape(result)
+
+        # Validate the translation
         num_alex = result.count('ALEX:')
         num_jamie = result.count('JAMIE:')
+        
         if not result.strip():
             print(f"[TranslationAgent] GPT translation failed (empty result), using English.")
             result = english_script
         elif num_alex < 2 or num_jamie < 2 or len(result) < 100:
-            print(f"[TranslationAgent] Warning: Translation may be incomplete or too short. Returning as-is.")
+            print(f"[TranslationAgent] Warning: Translation may be incomplete or too short. Returning as-is.\nResult:\n{result}\n---")
+
         TranslationAgent._translation_cache[cache_key] = result
         elapsed = time.time() - start_time
         print(f"[Timing] Translation to {target_language} took {elapsed:.2f} seconds")
