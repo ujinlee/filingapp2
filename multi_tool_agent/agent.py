@@ -24,7 +24,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # Use absolute path for audio directory
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
@@ -191,7 +191,7 @@ class SummarizationAgent:
                 "Key Points:"
             )
             chunk_start = time.time()
-            response = openai.ChatCompletion.create(
+            response = openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a financial analyst."},
@@ -202,7 +202,7 @@ class SummarizationAgent:
             )
             chunk_elapsed = time.time() - chunk_start
             print(f"[Timing] Chunk summarization took {chunk_elapsed:.2f} seconds")
-            return response['choices'][0]['message']['content']
+            return response.choices[0].message.content
         # Process chunks in parallel
         with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as executor:
             summaries = list(executor.map(summarize_chunk, chunks))
@@ -225,7 +225,7 @@ class SummarizationAgent:
             f"Key Points:\n{combined_summary}\n\n"
             "Podcast Script:"
         )
-        gpt_response = openai.ChatCompletion.create(
+        gpt_response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a financial analyst."},
@@ -234,7 +234,7 @@ class SummarizationAgent:
             max_tokens=2048,
             temperature=0.5,
         )
-        script = gpt_response['choices'][0]['message']['content'].strip()
+        script = gpt_response.choices[0].message.content.strip()
         # Validate and fix the script format
         lines = script.split('\n')
         formatted_lines = []
@@ -298,7 +298,7 @@ class TranslationAgent:
                 f"Return only the translated script, with each line starting with the correct speaker tag.\n\n"
                 f"{block}"
             )
-            response = openai.ChatCompletion.create(
+            response = openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": f"You are a professional translator to {target_language}."},
@@ -307,7 +307,7 @@ class TranslationAgent:
                 max_tokens=2048,
                 temperature=0.5,
             )
-            translated_text = response['choices'][0]['message']['content'].strip()
+            translated_text = response.choices[0].message.content.strip()
             lines = translated_text.split('\n')
             formatted_lines = []
             for line in lines:
