@@ -133,7 +133,10 @@ function App() {
                 <div style={{ fontWeight: 700, color: accent, fontSize: 20, marginBottom: 4 }}>{filing.form} - {filing.date}</div>
                 <div style={{ color: muted, fontSize: 15, marginBottom: 8 }}>{filing.description || (filing.form === "10-K" ? "Annual Report pursuant to Section 13 or 15(d)" : "Quarterly report pursuant to Section 13 or 15(d)")}</div>
                 <div style={{ margin: "10px 0", color: muted, fontSize: 15 }}>
-                  <span style={{ fontWeight: 500 }}>Document URL:</span> <a href={filing.url} target="_blank" rel="noopener noreferrer" style={{ color: accent, textDecoration: "underline" }}> {filing.url}</a>
+                  <span style={{ fontWeight: 500 }}>Document URL:</span>
+                  <span style={{ display: 'block', wordBreak: 'break-all', overflowWrap: 'anywhere' }}>
+                    <a href={filing.url} target="_blank" rel="noopener noreferrer" style={{ color: accent, textDecoration: "underline" }}>{filing.url}</a>
+                  </span>
                 </div>
                 <div style={{ margin: "18px 0 10px 0" }}>
                   <label style={{ marginRight: 8, color: text, fontWeight: 500, fontSize: 16 }}>Select Language</label>
