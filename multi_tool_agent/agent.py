@@ -328,9 +328,11 @@ class TranslationAgent:
         result = html.unescape(result)
         num_alex = result.count('ALEX:')
         num_jamie = result.count('JAMIE:')
-        if num_alex < 2 or num_jamie < 2 or len(result) < 100:
-            print(f"[TranslationAgent] GPT translation failed, using English.")
+        if not result.strip():
+            print(f"[TranslationAgent] GPT translation failed (empty result), using English.")
             result = english_script
+        elif num_alex < 2 or num_jamie < 2 or len(result) < 100:
+            print(f"[TranslationAgent] Warning: Translation may be incomplete or too short. Returning as-is.")
         TranslationAgent._translation_cache[cache_key] = result
         elapsed = time.time() - start_time
         print(f"[Timing] Translation to {target_language} took {elapsed:.2f} seconds")
