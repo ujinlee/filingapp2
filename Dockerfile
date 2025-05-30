@@ -21,6 +21,9 @@ RUN pip install inflect
 # Copy the rest of the code
 COPY . .
 
+# Copy Google credentials JSON for TTS
+COPY gen-lang-client-0081066415-848a196a3e68.json ./
+
 # Expose port for Cloud Run
 ENV PORT=8080
 
