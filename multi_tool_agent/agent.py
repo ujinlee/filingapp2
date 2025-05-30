@@ -210,7 +210,7 @@ class SummarizationAgent:
                     {"role": "system", "content": "You are a financial analyst."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=1024,
+                max_tokens=2000,
                 temperature=0.5,
             )
             chunk_elapsed = time.time() - chunk_start
