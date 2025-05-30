@@ -192,7 +192,7 @@ class SummarizationAgent:
         def summarize_chunk(chunk):
             prompt = (
                 "Extract key points from this section of an SEC filing. Focus on:\n"
-                "- Financial metrics and performance\n"
+                "- Financial metrics with specific numbers (revenue, growth, and key drivers of performance)\n"
                 "- Major business developments\n"
                 "- Risks and challenges\n"
                 "- Strategic initiatives\n"
@@ -229,11 +229,11 @@ class SummarizationAgent:
             "Create a detailed 3-4 minute podcast script from these key points. "
             "The script must always start with: 'Welcome to our FilingTalk, where we break down the latest in financial filings.'\n"
             "Format as a natural conversation between Alex and Jamie where:\n"
-            "- Alex asks focused questions about the most important developments\n"
+            "- Alex asks focused questions about revenue, growth, and drivers first\n"
             "- Jamie provides detailed, expert analysis, but with a more natural, conversational, and warm tone (avoid sounding robotic or overly formal)\n"
             "- Jamie should use contractions, casual phrases, and sound friendly and approachable\n"
             "- Include specific numbers and metrics when available\n"
-            "- Cover at least 5-6 major topics from the filing\n"
+            "- Cover at least 3 major impactful development or strategic topics from the filing\n"
             "- Each topic should have 2-3 exchanges between Alex and Jamie\n"
             "- Keep responses informative but conversational\n"
             "- Use natural transitions between topics\n"
