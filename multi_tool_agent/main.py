@@ -4,10 +4,23 @@ from pydantic import BaseModel
 from multi_tool_agent.agent import SECAgent, SummarizationAgent, TranslationAgent, TTSAgent, AUDIO_DIR
 import os
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",  # local React dev
+        "https://your-vercel-domain.vercel.app"  # replace with your actual Vercel domain
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Ensure audio directory exists
 os.makedirs(AUDIO_DIR, exist_ok=True)
