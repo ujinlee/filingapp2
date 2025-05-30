@@ -75,7 +75,7 @@ def cleanup_old_files():
 
 class SECAgent:
     @staticmethod
-    def get_cik_from_ticker(ticker: str):
+    def get_cik_from_ticker(ticker_or_name: str):
         url = "https://www.sec.gov/files/company_tickers.json"
         headers = {
             "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
@@ -85,19 +85,32 @@ class SECAgent:
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             companies = response.json()
+            
+            # First try exact ticker match
             for entry in companies.values():
-                if entry['ticker'].upper() == ticker.upper():
+                if entry['ticker'].upper() == ticker_or_name.upper():
                     return str(entry['cik_str']).zfill(10)
+            
+            # If no exact ticker match, try company name match
+            for entry in companies.values():
+                if entry['title'].upper() == ticker_or_name.upper():
+                    return str(entry['cik_str']).zfill(10)
+            
+            # If still no match, try partial company name match
+            for entry in companies.values():
+                if ticker_or_name.upper() in entry['title'].upper():
+                    return str(entry['cik_str']).zfill(10)
+            
             return None
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching CIK for {ticker}: {str(e)}")
+            print(f"Error fetching CIK for {ticker_or_name}: {str(e)}")
             return None
 
     @staticmethod
-    def list_filings(ticker: str):
-        cik = SECAgent.get_cik_from_ticker(ticker)
+    def list_filings(ticker_or_name: str):
+        cik = SECAgent.get_cik_from_ticker(ticker_or_name)
         if not cik:
-            return None, f"CIK not found for ticker {ticker}"
+            return None, f"CIK not found for {ticker_or_name}"
         url = f"https://data.sec.gov/submissions/CIK{cik}.json"
         headers = {
             "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
@@ -125,8 +138,8 @@ class SECAgent:
                     })
             return filings, None
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching filings for {ticker}: {str(e)}")
-            return None, f"Could not fetch filings for {ticker}: {str(e)}"
+            print(f"Error fetching filings for {ticker_or_name}: {str(e)}")
+            return None, f"Could not fetch filings for {ticker_or_name}: {str(e)}"
 
     @staticmethod
     def fetch_document(document_url: str):
