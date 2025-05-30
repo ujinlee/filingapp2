@@ -28,7 +28,7 @@ ENV PORT=8080
 RUN ls -l /app
 RUN ls -l /app/multi_tool_agent
 RUN cat /app/multi_tool_agent/__init__.py
-RUN python -c "import multi_tool_agent.agent"
+
 
 # Run the FastAPI app with uvicorn
 CMD ["uvicorn", "multi_tool_agent.main:app", "--host", "0.0.0.0", "--port", "8080"] 
