@@ -222,10 +222,12 @@ class SummarizationAgent:
         # Combine summaries and create podcast script
         combined_summary = "\n".join(summaries)
         podcast_prompt = (
-            "Create a detailed 3-4 minute podcast script from these key points. "
+            Create a detailed 3-4 minute podcast script from these key points. "
+            "The script must always start with: 'Welcome to our FilingTalk, where we break down the latest in financial filings.'\n"
             "Format as a natural conversation between Alex and Jamie where:\n"
             "- Alex asks focused questions about the most important developments\n"
-            "- Jamie provides detailed, expert analysis\n"
+            "- Jamie provides detailed, expert analysis, but with a more natural, conversational, and warm tone (avoid sounding robotic or overly formal)\n"
+            "- Jamie should use contractions, casual phrases, and sound friendly and approachable\n"
             "- Include specific numbers and metrics when available\n"
             "- Cover at least 5-6 major topics from the filing\n"
             "- Each topic should have 2-3 exchanges between Alex and Jamie\n"
@@ -398,6 +400,8 @@ class TTSAgent:
                 return p.number_to_words(num, andword='', zero='zero', group=1)
             return str(num)
         text = re.sub(r'\b\d{4,}\b', number_to_words, text)
+        # Always pronounce SEC as S-E-C
+        text = re.sub(r'\bSEC\b', 'S-E-C', text)
         return text
     
     @staticmethod
