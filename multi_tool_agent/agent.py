@@ -16,6 +16,8 @@ from google.cloud import translate_v2 as translate
 import html
 import inflect
 import openai
+print("[DEBUG] openai module version:", getattr(openai, '__version__', 'unknown'))
+print("[DEBUG] OPENAI_API_KEY is set:", bool(os.getenv("OPENAI_API_KEY")))
 
 SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
