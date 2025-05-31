@@ -186,10 +186,20 @@ def extract_key_financials_from_sec_json(sec_json, num_periods=2):
     """
     Extracts official Revenue, Net Income, and EPS (basic) from SEC JSON for up to num_periods.
     Returns a list of dicts: [{period, revenue, net_income, eps}]
+    Also prints all available periods and values for each us-gaap label considered, for debugging.
     """
     forms = sec_json['filings']['recent']
     results = []
     used_periods = set()
+
+    def print_label_debug(label, fact):
+        if not fact or 'units' not in fact:
+            print(f"[DEBUG] Label {label}: No data found.")
+            return
+        print(f"[DEBUG] Label {label}:")
+        for unit, entries in fact['units'].items():
+            for entry in entries:
+                print(f"    unit: {unit}, end: {entry.get('end')}, val: {entry.get('val')}")
 
     def get_fact_value(fact, period):
         if not fact or 'units' not in fact:
@@ -225,6 +235,13 @@ def extract_key_financials_from_sec_json(sec_json, num_periods=2):
         'EarningsPerShareBasicAndDiluted',
     ]
 
+    # Print all available periods/values for each label
+    print("[DEBUG] --- SEC JSON us-gaap label values ---")
+    facts = sec_json.get('facts', {}).get('us-gaap', {})
+    for label in revenue_labels + net_income_labels + eps_labels:
+        print_label_debug(label, facts.get(label))
+    print("[DEBUG] --- END SEC JSON us-gaap label values ---\n")
+
     for i, form in enumerate(forms['form']):
         if form not in ['10-Q', '10-K']:
             continue
@@ -233,7 +250,6 @@ def extract_key_financials_from_sec_json(sec_json, num_periods=2):
             continue
         used_periods.add(period)
         try:
-            facts = sec_json['facts']['us-gaap']
             rev = None
             for label in revenue_labels:
                 rev = facts.get(label)
