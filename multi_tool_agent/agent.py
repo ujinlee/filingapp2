@@ -305,18 +305,12 @@ def check_script_numbers_period_aware(script, financials):
             val = f[key]
             if val is None:
                 continue
-            # Acceptable forms: $X, $X million, $X billion, X.XX, etc.
             num_pattern = re.escape(str(val))
-            # Only allow this number if the period is mentioned nearby
-            period_pattern = re.escape(f['period'])
-            # Find all occurrences of the number
             for m in re.finditer(num_pattern, script):
-                # Look for the period within 50 chars before or after
                 start = max(0, m.start() - 50)
                 end = min(len(script), m.end() + 50)
                 context = script[start:end]
                 if f['period'] not in context:
-                    # Redact this number
                     script = script[:m.start()] + '[REDACTED]' + script[m.end():]
                     flagged = True
     if flagged:
@@ -725,9 +719,3 @@ class TTSAgent:
         elapsed = time.time() - start_time
         print(f"[Timing] TTS synthesis for {language} took {elapsed:.2f} seconds")
         return filename 
-
-# Example usage after LLM call:
-# allowed_numbers = list(revenue) + list(net_income) + list(eps_basic)
-# script, flagged = check_script_numbers_period_aware(script, financials)
-# if flagged:
-#     print("Warning: The script contains numbers not in the extracted set!") 
