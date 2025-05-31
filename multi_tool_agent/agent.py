@@ -185,9 +185,9 @@ class SECAgent:
 
 def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, num_periods=2):
     """
-    Hybrid extraction: Gather all candidate values for each metric/period from SEC JSON, parse the income statement table from the filing HTML,
-    and select the SEC JSON value that matches the table value (within tolerance). If no match, fall back to largest value or flag for review.
-    Returns a list of dicts: [{period, revenue, net_income, eps, source, match_status}]
+    Hybrid extraction: For each period, only use the SEC JSON value that matches the table value (within tolerance) for revenue, net income, and EPS.
+    Do not allow multiple values per period. If no match, use the fallback (largest value) and flag it.
+    Returns a list of dicts: [{period, revenue, net_income, eps, match_status}]
     """
     forms = sec_json['filings']['recent']
     results = []
@@ -233,7 +233,6 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
         return candidates
 
     def parse_income_statement_table_llm(html):
-        # Use LLM to extract the main income statement table as a dict: {period: {metric: value}}
         prompt = (
             "Extract the main income statement table from the following SEC filing HTML. "
             "Return a JSON object mapping period end dates to a dict of metrics (Revenue, Net Income, EPS, Operating Income, etc.) and their values. "
@@ -258,7 +257,6 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
             print("[DEBUG] LLM table parse error:", e)
             return {}
 
-    # Parse the table from the HTML
     table = parse_income_statement_table_llm(filing_html)
 
     for i, form in enumerate(forms['form']):
@@ -268,11 +266,9 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
         if period in used_periods:
             continue
         used_periods.add(period)
-        # Gather all candidate values from SEC JSON
         revenue_candidates = get_all_candidate_values(revenue_labels, period)
         net_income_candidates = get_all_candidate_values(net_income_labels, period)
         eps_candidates = get_all_candidate_values(eps_labels, period)
-        # Get table values for this period
         table_row = table.get(period, {})
         def match_candidate(candidates, table_val):
             for c in candidates:
@@ -281,12 +277,10 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
                         return c['val'], c['label'], 'matched'
                 except Exception:
                     continue
-            # If no match, fall back to largest value
             if candidates:
                 largest = max(candidates, key=lambda x: abs(float(x['val'])))
                 return largest['val'], largest['label'], 'fallback_largest'
             return None, None, 'not_found'
-        # Try to match each metric
         revenue_val, revenue_label, revenue_status = match_candidate(revenue_candidates, table_row.get('Revenue'))
         net_income_val, net_income_label, net_income_status = match_candidate(net_income_candidates, table_row.get('Net Income'))
         eps_val, eps_label, eps_status = match_candidate(eps_candidates, table_row.get('EPS'))
@@ -297,6 +291,7 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
         print(f"[DEBUG] Period {period}: Selected Revenue: {revenue_val} (label: {revenue_label}, status: {revenue_status})")
         print(f"[DEBUG] Period {period}: Selected Net Income: {net_income_val} (label: {net_income_label}, status: {net_income_status})")
         print(f"[DEBUG] Period {period}: Selected EPS: {eps_val} (label: {eps_label}, status: {eps_status})")
+        # Only allow the selected value for each metric to be used for this period
         results.append({
             'period': period,
             'revenue': revenue_val,
@@ -311,6 +306,9 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
         })
         if len(results) == num_periods:
             break
+    print("[DEBUG] Final selected values per period:")
+    for r in results:
+        print(f"  Period: {r['period']} | Revenue: {r['revenue']} (label: {r['revenue_label']}, status: {r['revenue_status']}) | Net Income: {r['net_income']} (label: {r['net_income_label']}, status: {r['net_income_status']}) | EPS: {r['eps']} (label: {r['eps_label']}, status: {r['eps_status']})")
     return results
 
 def build_podcast_prompt_from_financials(financials):
