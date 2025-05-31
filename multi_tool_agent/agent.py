@@ -18,6 +18,7 @@ import inflect
 import openai
 print("[DEBUG] openai module version:", getattr(openai, '__version__', 'unknown'))
 print("[DEBUG] OPENAI_API_KEY is set:", bool(os.getenv("OPENAI_API_KEY")))
+import tiktoken
 
 SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -181,9 +182,150 @@ class SECAgent:
                 else:
                     return None, f"Failed to fetch filing after {max_retries} attempts: {str(e)}"
 
+def extract_key_financials_from_sec_json(sec_json, num_periods=2):
+    """
+    Extracts official Revenue, Net Income, and EPS (basic) from SEC JSON for up to num_periods.
+    Returns a list of dicts: [{period, revenue, net_income, eps}]
+    """
+    forms = sec_json['filings']['recent']
+    results = []
+    used_periods = set()
+
+    def get_fact_value(fact, period):
+        if not fact or 'units' not in fact:
+            return None
+        for unit in fact['units'].values():
+            for entry in unit:
+                entry_date = entry.get('end', '')[:10]
+                if entry_date == period:
+                    return entry['val']
+                try:
+                    entry_dt = datetime.strptime(entry_date, "%Y-%m-%d")
+                    period_dt = datetime.strptime(period, "%Y-%m-%d")
+                    if abs((entry_dt - period_dt).days) == 1:
+                        return entry['val']
+                except Exception:
+                    continue
+        return None
+
+    revenue_labels = [
+        'Revenues',
+        'RevenueFromContractWithCustomerExcludingAssessedTax',
+        'SalesRevenueNet',
+        'SalesRevenueGoodsNet',
+        'TotalRevenuesAndOtherIncome',
+    ]
+    net_income_labels = [
+        'NetIncomeLoss',
+        'ProfitLoss',
+        'NetIncomeLossAvailableToCommonStockholdersBasic',
+    ]
+    eps_labels = [
+        'EarningsPerShareBasic',
+        'EarningsPerShareBasicAndDiluted',
+    ]
+
+    for i, form in enumerate(forms['form']):
+        if form not in ['10-Q', '10-K']:
+            continue
+        period = forms['filingDate'][i]
+        if period in used_periods:
+            continue
+        used_periods.add(period)
+        try:
+            facts = sec_json['facts']['us-gaap']
+            rev = None
+            for label in revenue_labels:
+                rev = facts.get(label)
+                if rev:
+                    break
+            ni = None
+            for label in net_income_labels:
+                ni = facts.get(label)
+                if ni:
+                    break
+            eps = None
+            for label in eps_labels:
+                eps = facts.get(label)
+                if eps:
+                    break
+            results.append({
+                'period': period,
+                'revenue': get_fact_value(rev, period),
+                'net_income': get_fact_value(ni, period),
+                'eps': get_fact_value(eps, period)
+            })
+        except Exception as e:
+            print(f"[DEBUG] Extraction error for period {period}: {e}")
+            results.append({'period': period, 'revenue': None, 'net_income': None, 'eps': None})
+        if len(results) == num_periods:
+            break
+    print("[DEBUG] Final extracted financials:")
+    for r in results:
+        print(f"  Period: {r['period']} | Revenue: {r['revenue']} | Net Income: {r['net_income']} | EPS: {r['eps']}")
+    return results
+
+def build_podcast_prompt_from_financials(financials):
+    def calc_growth(new, old):
+        try:
+            return (float(new) - float(old)) / float(old) * 100
+        except:
+            return None
+    prompt_lines = ["Here are the key financial numbers for the company, by period:"]
+    for i, f in enumerate(financials):
+        prompt_lines.append(f"- Period: {f['period']}")
+        prompt_lines.append(f"  Revenue: ${f['revenue']} million")
+        prompt_lines.append(f"  Net income: ${f['net_income']} million")
+        prompt_lines.append(f"  Basic earnings per share: ${f['eps']}")
+        if i > 0 and f['revenue'] and financials[i-1]['revenue']:
+            growth = calc_growth(f['revenue'], financials[i-1]['revenue'])
+            if growth is not None:
+                prompt_lines.append(f"  Revenue YoY/QoQ growth: {growth:.1f}% (from ${financials[i-1]['revenue']} million in {financials[i-1]['period']})")
+        if i > 0 and f['net_income'] and financials[i-1]['net_income']:
+            growth = calc_growth(f['net_income'], financials[i-1]['net_income'])
+            if growth is not None:
+                prompt_lines.append(f"  Net income YoY/QoQ growth: {growth:.1f}% (from ${financials[i-1]['net_income']} million in {financials[i-1]['period']})")
+        if i > 0 and f['eps'] and financials[i-1]['eps']:
+            growth = calc_growth(f['eps'], financials[i-1]['eps'])
+            if growth is not None:
+                prompt_lines.append(f"  EPS YoY/QoQ growth: {growth:.1f}% (from ${financials[i-1]['eps']} in {financials[i-1]['period']})")
+    prompt_lines.append("\nYou must only use the numbers provided above, and only in reference to their correct period. Do not use or mention any other numbers. If you need to reference a number, it must be one of the numbers listed above for the correct period. If a number is not provided, do not estimate, invent, or mention it.")
+    prompt_lines.append("Please generate a 3-4 minute podcast script as a conversation between Alex and Jamie, focusing on these numbers and their significance. If you discuss reasons for changes, use only what is explicitly stated in the provided context. Always specify the period when mentioning a number.")
+    return '\n'.join(prompt_lines)
+
+def check_script_numbers_period_aware(script, financials):
+    """
+    For each number in the script, check that it is only used in the context of its correct period.
+    If a number is used in the wrong period, redact it.
+    """
+    import re
+    flagged = False
+    for f in financials:
+        for key in ['revenue', 'net_income', 'eps']:
+            val = f[key]
+            if val is None:
+                continue
+            # Acceptable forms: $X, $X million, $X billion, X.XX, etc.
+            num_pattern = re.escape(str(val))
+            # Only allow this number if the period is mentioned nearby
+            period_pattern = re.escape(f['period'])
+            # Find all occurrences of the number
+            for m in re.finditer(num_pattern, script):
+                # Look for the period within 50 chars before or after
+                start = max(0, m.start() - 50)
+                end = min(len(script), m.end() + 50)
+                context = script[start:end]
+                if f['period'] not in context:
+                    # Redact this number
+                    script = script[:m.start()] + '[REDACTED]' + script[m.end():]
+                    flagged = True
+    if flagged:
+        script += "\n[WARNING: Some numbers were replaced with [REDACTED] because they were not referenced with the correct period!]"
+    return script, flagged
+
 class SummarizationAgent:
     @staticmethod
-    def summarize(content: str) -> str:
+    def summarize(content: str, allowed_numbers=None) -> str:
         start_time = time.time()
         # Split content into chunks for faster processing
         max_chunk_size = 5000
@@ -191,7 +333,12 @@ class SummarizationAgent:
         def summarize_chunk(chunk):
             prompt = (
                 "Extract key points from this section of an SEC filing. Focus on:\n"
-                "- Financial metrics and performance\n"
+                "- For revenue, net income, and net income per share, use only the values from the 'Revenue', 'Net Income', and 'Income per share' lines in the Condensed Consolidated Statements of Income table.\n"
+                "- Calculate YoY or QoQ growth using these exact numbers if both periods are present. State the percentage and show the calculation.\n"
+                "- Do not use or mention growth rates or numbers from other lines or sections.\n"
+                "- If both periods are not present, do not mention growth.\n"
+                "- Use the exact numbers as stated in the text. Do not estimate or invent numbers. If a number is not present, do not mention it.\n"
+                "- If there is a large variance (big change) between periods, perform variance analysis and explain the reason ONLY if the reason is explicitly stated in the text. Do not make up or guess reasons.\n"
                 "- Major business developments\n"
                 "- Risks and challenges\n"
                 "- Strategic initiatives\n"
@@ -221,15 +368,20 @@ class SummarizationAgent:
             summaries = list(executor.map(summarize_chunk, chunks))
         # Combine summaries and create podcast script
         combined_summary = "\n".join(summaries)
-        podcast_prompt = (
+        # Calculate token length for the prompt
+        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+        # Compose the podcast prompt (with a placeholder for combined_summary)
+        base_prompt = (
             "Create a detailed 3-4 minute podcast script from these key points. "
             "The script must always start with: 'Welcome to our FilingTalk, where we break down the latest in financial filings.'\n"
             "Format as a natural conversation between Alex and Jamie where:\n"
-            "- Alex asks focused questions about the most important developments\n"
+            "- Alex asks focused questions about revenue, growth, and drivers first\n"
             "- Jamie provides detailed, expert analysis, but with a more natural, conversational, and warm tone (avoid sounding robotic or overly formal)\n"
             "- Jamie should use contractions, casual phrases, and sound friendly and approachable\n"
+            "- When mentioning large numbers or financial figures, use natural spoken forms (e.g., 'one hundred four billion dollars' instead of '$104.169 billion')\n"
+            "- If a specific growth rate or percentage is not available, do not mention it or use placeholders like 'X%'\n"
             "- Include specific numbers and metrics when available\n"
-            "- Cover at least 5-6 major topics from the filing\n"
+            "- Cover at least 3 major impactful development or strategic topics from the filing\n"
             "- Each topic should have 2-3 exchanges between Alex and Jamie\n"
             "- Keep responses informative but conversational\n"
             "- Use natural transitions between topics\n"
@@ -237,9 +389,24 @@ class SummarizationAgent:
             "- IMPORTANT: Each line must start with either 'ALEX:' or 'JAMIE:' followed by their dialogue\n"
             "- Do not include any other text or formatting\n"
             "- Ensure the total script is long enough for a 3-4 minute podcast\n\n"
-            f"Key Points:\n{combined_summary}\n\n"
-            "Podcast Script:"
+            "Key Points:\n"
         )
+        # Truncate combined_summary to fit within a safe token limit
+        max_tokens = 3500
+        summary_tokens = encoding.encode(combined_summary)
+        base_tokens = encoding.encode(base_prompt)
+        script_tokens = encoding.encode("Podcast Script:")
+        # Leave room for the model's response (e.g., 500 tokens)
+        max_summary_tokens = max_tokens - len(base_tokens) - len(script_tokens) - 500
+        if len(summary_tokens) > max_summary_tokens:
+            print(f"[DEBUG] Truncating combined_summary from {len(summary_tokens)} to {max_summary_tokens} tokens")
+            summary_tokens = summary_tokens[:max_summary_tokens]
+            combined_summary = encoding.decode(summary_tokens)
+        podcast_prompt = (
+            base_prompt + combined_summary + "\n\nPodcast Script:"
+        )
+        print(f"[DEBUG] podcast_prompt length (chars): {len(podcast_prompt)}")
+        print(f"[DEBUG] podcast_prompt token count: {len(encoding.encode(podcast_prompt))}")
         gpt_response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -266,6 +433,13 @@ class SummarizationAgent:
                 formatted_lines.append(line)
         summary = '\n'.join(formatted_lines)
         summary = html.unescape(summary)
+
+        # ENFORCE STRICT NUMBER USAGE: redact any numbers not in allowed_numbers
+        if allowed_numbers is not None:
+            summary, flagged = check_script_numbers_period_aware(summary, financials)
+            if flagged:
+                print("[WARNING] Some numbers in the script were not in the allowed set and were redacted!")
+
         elapsed = time.time() - start_time
         print(f"[Timing] Summarization (all chunks + final) took {elapsed:.2f} seconds")
         return summary
@@ -392,8 +566,23 @@ class TTSAgent:
         text = re.sub(r'20[0-9]{2}', year_to_words, text)
         # Replace 10-Q and 10-K with 'ten Q' and 'ten K'
         text = re.sub(r'10-([QK])', r'ten \1', text, flags=re.IGNORECASE)
-        # Convert large numbers to words (e.g., 1000000 -> one million)
+        # Convert currency and large numbers to words (e.g., $104.169 billion -> one hundred four billion dollars)
         p = inflect.engine()
+        def currency_to_words(match):
+            num = float(match.group(1).replace(',', ''))
+            unit = match.group(2)
+            if unit:
+                unit = unit.lower()
+                if unit.startswith('b'):
+                    num = int(num)
+                    return f"{p.number_to_words(num, andword='', zero='zero', group=1)} billion dollars"
+                elif unit.startswith('m'):
+                    num = int(num)
+                    return f"{p.number_to_words(num, andword='', zero='zero', group=1)} million dollars"
+            return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} dollars"
+        # $104.169 billion, $104 billion, $104,169,000,000
+        text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
+        # Convert large numbers to words (e.g., 1000000 -> one million)
         def number_to_words(match):
             num = int(match.group())
             if num >= 1000:
@@ -536,3 +725,9 @@ class TTSAgent:
         elapsed = time.time() - start_time
         print(f"[Timing] TTS synthesis for {language} took {elapsed:.2f} seconds")
         return filename 
+
+# Example usage after LLM call:
+# allowed_numbers = list(revenue) + list(net_income) + list(eps_basic)
+# script, flagged = check_script_numbers_period_aware(script, financials)
+# if flagged:
+#     print("Warning: The script contains numbers not in the extracted set!") 
