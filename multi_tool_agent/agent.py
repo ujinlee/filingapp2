@@ -19,6 +19,7 @@ import openai
 print("[DEBUG] openai module version:", getattr(openai, '__version__', 'unknown'))
 print("[DEBUG] OPENAI_API_KEY is set:", bool(os.getenv("OPENAI_API_KEY")))
 import tiktoken
+import numpy as np
 
 SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -182,41 +183,15 @@ class SECAgent:
                 else:
                     return None, f"Failed to fetch filing after {max_retries} attempts: {str(e)}"
 
-def extract_key_financials_from_sec_json(sec_json, num_periods=2):
+def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, num_periods=2):
     """
-    Extracts official Revenue, Net Income, and EPS (basic) from SEC JSON for up to num_periods.
-    Returns a list of dicts: [{period, revenue, net_income, eps}]
-    Also prints all available periods and values for each us-gaap label considered, for debugging.
+    Hybrid extraction: Gather all candidate values for each metric/period from SEC JSON, parse the income statement table from the filing HTML,
+    and select the SEC JSON value that matches the table value (within tolerance). If no match, fall back to largest value or flag for review.
+    Returns a list of dicts: [{period, revenue, net_income, eps, source, match_status}]
     """
     forms = sec_json['filings']['recent']
     results = []
     used_periods = set()
-
-    def print_label_debug(label, fact):
-        if not fact or 'units' not in fact:
-            print(f"[DEBUG] Label {label}: No data found.")
-            return
-        print(f"[DEBUG] Label {label}:")
-        for unit, entries in fact['units'].items():
-            for entry in entries:
-                print(f"    unit: {unit}, end: {entry.get('end')}, val: {entry.get('val')}")
-
-    def get_fact_value(fact, period):
-        if not fact or 'units' not in fact:
-            return None
-        for unit in fact['units'].values():
-            for entry in unit:
-                entry_date = entry.get('end', '')[:10]
-                if entry_date == period:
-                    return entry['val']
-                try:
-                    entry_dt = datetime.strptime(entry_date, "%Y-%m-%d")
-                    period_dt = datetime.strptime(period, "%Y-%m-%d")
-                    if abs((entry_dt - period_dt).days) == 1:
-                        return entry['val']
-                except Exception:
-                    continue
-        return None
 
     revenue_labels = [
         'Revenues',
@@ -234,13 +209,57 @@ def extract_key_financials_from_sec_json(sec_json, num_periods=2):
         'EarningsPerShareBasic',
         'EarningsPerShareBasicAndDiluted',
     ]
-
-    # Print all available periods/values for each label
-    print("[DEBUG] --- SEC JSON us-gaap label values ---")
     facts = sec_json.get('facts', {}).get('us-gaap', {})
-    for label in revenue_labels + net_income_labels + eps_labels:
-        print_label_debug(label, facts.get(label))
-    print("[DEBUG] --- END SEC JSON us-gaap label values ---\n")
+
+    def get_all_candidate_values(labels, period):
+        candidates = []
+        for label in labels:
+            fact = facts.get(label)
+            if not fact or 'units' not in fact:
+                continue
+            for unit, entries in fact['units'].items():
+                for entry in entries:
+                    entry_date = entry.get('end', '')[:10]
+                    if entry_date == period:
+                        candidates.append({'label': label, 'unit': unit, 'val': entry['val']})
+                    else:
+                        try:
+                            entry_dt = datetime.strptime(entry_date, "%Y-%m-%d")
+                            period_dt = datetime.strptime(period, "%Y-%m-%d")
+                            if abs((entry_dt - period_dt).days) == 1:
+                                candidates.append({'label': label, 'unit': unit, 'val': entry['val']})
+                        except Exception:
+                            continue
+        return candidates
+
+    def parse_income_statement_table_llm(html):
+        # Use LLM to extract the main income statement table as a dict: {period: {metric: value}}
+        prompt = (
+            "Extract the main income statement table from the following SEC filing HTML. "
+            "Return a JSON object mapping period end dates to a dict of metrics (Revenue, Net Income, EPS, Operating Income, etc.) and their values. "
+            "If a value is not present, omit it. Only extract numbers as they appear in the table.\n\n"
+            f"HTML:\n{html[:12000]}\n\nJSON:"
+        )
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a financial analyst and expert table parser."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1024,
+            temperature=0.0,
+        )
+        import json
+        try:
+            table_json = json.loads(response.choices[0].message.content)
+            print("[DEBUG] LLM parsed table:", table_json)
+            return table_json
+        except Exception as e:
+            print("[DEBUG] LLM table parse error:", e)
+            return {}
+
+    # Parse the table from the HTML
+    table = parse_income_statement_table_llm(filing_html)
 
     for i, form in enumerate(forms['form']):
         if form not in ['10-Q', '10-K']:
@@ -249,36 +268,49 @@ def extract_key_financials_from_sec_json(sec_json, num_periods=2):
         if period in used_periods:
             continue
         used_periods.add(period)
-        try:
-            rev = None
-            for label in revenue_labels:
-                rev = facts.get(label)
-                if rev:
-                    break
-            ni = None
-            for label in net_income_labels:
-                ni = facts.get(label)
-                if ni:
-                    break
-            eps = None
-            for label in eps_labels:
-                eps = facts.get(label)
-                if eps:
-                    break
-            results.append({
-                'period': period,
-                'revenue': get_fact_value(rev, period),
-                'net_income': get_fact_value(ni, period),
-                'eps': get_fact_value(eps, period)
-            })
-        except Exception as e:
-            print(f"[DEBUG] Extraction error for period {period}: {e}")
-            results.append({'period': period, 'revenue': None, 'net_income': None, 'eps': None})
+        # Gather all candidate values from SEC JSON
+        revenue_candidates = get_all_candidate_values(revenue_labels, period)
+        net_income_candidates = get_all_candidate_values(net_income_labels, period)
+        eps_candidates = get_all_candidate_values(eps_labels, period)
+        # Get table values for this period
+        table_row = table.get(period, {})
+        def match_candidate(candidates, table_val):
+            for c in candidates:
+                try:
+                    if table_val is not None and np.isclose(float(c['val']), float(table_val), rtol=0.01):
+                        return c['val'], c['label'], 'matched'
+                except Exception:
+                    continue
+            # If no match, fall back to largest value
+            if candidates:
+                largest = max(candidates, key=lambda x: abs(float(x['val'])))
+                return largest['val'], largest['label'], 'fallback_largest'
+            return None, None, 'not_found'
+        # Try to match each metric
+        revenue_val, revenue_label, revenue_status = match_candidate(revenue_candidates, table_row.get('Revenue'))
+        net_income_val, net_income_label, net_income_status = match_candidate(net_income_candidates, table_row.get('Net Income'))
+        eps_val, eps_label, eps_status = match_candidate(eps_candidates, table_row.get('EPS'))
+        print(f"[DEBUG] Period {period}: Revenue candidates: {revenue_candidates}")
+        print(f"[DEBUG] Period {period}: Net Income candidates: {net_income_candidates}")
+        print(f"[DEBUG] Period {period}: EPS candidates: {eps_candidates}")
+        print(f"[DEBUG] Period {period}: Table row: {table_row}")
+        print(f"[DEBUG] Period {period}: Selected Revenue: {revenue_val} (label: {revenue_label}, status: {revenue_status})")
+        print(f"[DEBUG] Period {period}: Selected Net Income: {net_income_val} (label: {net_income_label}, status: {net_income_status})")
+        print(f"[DEBUG] Period {period}: Selected EPS: {eps_val} (label: {eps_label}, status: {eps_status})")
+        results.append({
+            'period': period,
+            'revenue': revenue_val,
+            'revenue_label': revenue_label,
+            'revenue_status': revenue_status,
+            'net_income': net_income_val,
+            'net_income_label': net_income_label,
+            'net_income_status': net_income_status,
+            'eps': eps_val,
+            'eps_label': eps_label,
+            'eps_status': eps_status
+        })
         if len(results) == num_periods:
             break
-    print("[DEBUG] Final extracted financials:")
-    for r in results:
-        print(f"  Period: {r['period']} | Revenue: {r['revenue']} | Net Income: {r['net_income']} | EPS: {r['eps']}")
     return results
 
 def build_podcast_prompt_from_financials(financials):
