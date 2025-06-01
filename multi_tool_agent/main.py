@@ -109,8 +109,11 @@ async def summarize_filing(request: SummarizeRequest):
         # 6. Build the LLM prompt with both numbers and MDA
         prompt = (
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
-            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, covering all real facts, numbers, and key points in this text from multiple angles (e.g., financials, strategy, risks, outlook, etc.). "
-            "Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
+            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
+            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL). "
+            "2. Details and strategic drivers (discuss what drove the numbers, management commentary, business segments, etc. from the MDA). "
+            "3. Risks, opportunities, and outlook (cover forward-looking statements, risk factors, and opportunities from the MDA). "
+            "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
             "Do NOT mention the MDA section or Management's Discussion and Analysis by name. Just incorporate its insights naturally. "
@@ -130,7 +133,7 @@ async def summarize_filing(request: SummarizeRequest):
         try:
             transcript = TranslationAgent.translate(summary, request.language)
             # After translation, enforce strict alternation of speaker tags, always starting with ALEX
-            lines = transcript.split('\n')
+            lines = [line for line in transcript.split('\n') if line.strip()]
             normalized_lines = []
             speaker = 'ALEX'
             for line in lines:

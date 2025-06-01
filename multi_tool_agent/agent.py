@@ -339,21 +339,22 @@ class SummarizationAgent:
             mda_section = mda_text[:mda_end].strip()
             print(f"[extract_mda_section] Extracted MDA section from text (first 500 chars): {mda_section[:500]}")
             return mda_section
-        # Fallback: extract content between 'Item 7' and next 'Item 7A' or 'Item 8' if previous methods fail
+        # Fallback: extract content between 'Item 7' or 'Item 2' and next major item if previous methods fail
         try:
             text = soup.get_text(separator=' ', strip=True)
             text_lower = text.lower()
+            # Try Item 7 first
             mda_start = re.search(r"item\s*7[.:\-\s]+management[’'`s ]*discussion", text_lower)
             if not mda_start:
                 mda_start = re.search(r"item\s*7[.:\-\s]+", text_lower)
+            mda_end = None
             if mda_start:
                 start_idx = mda_start.start()
-                mda_end = None
                 for pat in [r"item\s*7a[.:\-\s]+", r"item\s*8[.:\-\s]+"]:
                     match = re.search(pat, text_lower[start_idx+1:])
                     if match:
                         end_idx = start_idx + 1 + match.start()
-                        if mda_end is None or end_idx > mda_end:
+                        if mda_end is None or end_idx < mda_end:
                             mda_end = end_idx
                 if not mda_end:
                     mda_end = len(text)
@@ -361,8 +362,27 @@ class SummarizationAgent:
                 if len(mda_section) > 1000:
                     print(f"[extract_mda_section] Fallback: Extracted between Item 7 and next Item 7A/8 (first 500 chars): {mda_section[:500]}")
                     return mda_section
+            # If Item 7 not found, try Item 2
+            mda_start = re.search(r"item\s*2[.:\-\s]+management[’'`s ]*discussion", text_lower)
+            if not mda_start:
+                mda_start = re.search(r"item\s*2[.:\-\s]+", text_lower)
+            mda_end = None
+            if mda_start:
+                start_idx = mda_start.start()
+                for pat in [r"item\s*3[.:\-\s]+", r"item\s*4[.:\-\s]+"]:
+                    match = re.search(pat, text_lower[start_idx+1:])
+                    if match:
+                        end_idx = start_idx + 1 + match.start()
+                        if mda_end is None or end_idx < mda_end:
+                            mda_end = end_idx
+                if not mda_end:
+                    mda_end = len(text)
+                mda_section = text[start_idx:mda_end].strip()
+                if len(mda_section) > 1000:
+                    print(f"[extract_mda_section] Fallback: Extracted between Item 2 and next Item 3/4 (first 500 chars): {mda_section[:500]}")
+                    return mda_section
         except Exception as e:
-            print(f"[extract_mda_section] Fallback Item 7-8 extraction failed: {e}")
+            print(f"[extract_mda_section] Fallback Item 7/2 extraction failed: {e}")
         # FINAL fallback: scan for the longest section containing both 'management' and 'discussion'
         candidates = re.findall(r'([\s\S]{0,10000})', content)
         best = ''
