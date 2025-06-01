@@ -201,121 +201,20 @@ class SummarizationAgent:
     @staticmethod
     def summarize(content: str, allowed_numbers=None) -> str:
         start_time = time.time()
-        # Split content into chunks for faster processing
-        max_chunk_size = 5000
-        chunks = [content[i:i + max_chunk_size] for i in range(0, len(content), max_chunk_size)]
-        def summarize_chunk(chunk):
-            prompt = (
-                "Extract key points from this section of an SEC filing. Focus on:\n"
-                "- For revenue, net income, and net income per share, use only the values from the 'Revenue', 'Net Income', and 'Income per share' lines in the Condensed Consolidated Statements of Income table.\n"
-                "- Calculate YoY or QoQ growth using these exact numbers if both periods are present. State the percentage and show the calculation.\n"
-                "- Do not use or mention growth rates or numbers from other lines or sections.\n"
-                "- If both periods are not present, do not mention growth.\n"
-                "- Use the exact numbers as stated in the text. Do not estimate or invent numbers. If a number is not present, do not mention it.\n"
-                "- If there is a large variance (big change) between periods, perform variance analysis and explain the reason ONLY if the reason is explicitly stated in the text. Do not make up or guess reasons.\n"
-                "- Major business developments\n"
-                "- Risks and challenges\n"
-                "- Strategic initiatives\n"
-                "- Market position\n"
-                "- Revenue and growth\n"
-                "- Operational highlights\n"
-                "- Future outlook\n"
-                "- Competitive landscape\n\n"
-                f"Content:\n{chunk}\n\n"
-                "Key Points:"
-            )
-            chunk_start = time.time()
-            response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a financial analyst."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1024,
-                temperature=0.5,
-            )
-            chunk_elapsed = time.time() - chunk_start
-            print(f"[Timing] Chunk summarization took {chunk_elapsed:.2f} seconds")
-            return response.choices[0].message.content
-        # Process chunks in parallel
-        with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as executor:
-            summaries = list(executor.map(summarize_chunk, chunks))
-        # Combine summaries and create podcast script
-        combined_summary = "\n".join(summaries)
-        # Calculate token length for the prompt
-        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        # Compose the podcast prompt (with a placeholder for combined_summary)
-        base_prompt = (
-            "Create a detailed 3-4 minute podcast script from these key points. "
-            "The script must always start with: 'Welcome to our FilingTalk, where we break down the latest in financial filings.'\n"
-            "Format as a natural conversation between Alex and Jamie where:\n"
-            "- Alex asks focused questions about revenue, growth, and drivers first\n"
-            "- Jamie provides detailed, expert analysis, but with a more natural, conversational, and warm tone (avoid sounding robotic or overly formal)\n"
-            "- Jamie should use contractions, casual phrases, and sound friendly and approachable\n"
-            "- When mentioning large numbers or financial figures, use natural spoken forms (e.g., 'one hundred four billion dollars' instead of '$104.169 billion')\n"
-            "- If a specific growth rate or percentage is not available, do not mention it or use placeholders like 'X%'\n"
-            "- Include specific numbers and metrics when available\n"
-            "- Cover at least 3 major impactful development or strategic topics from the filing\n"
-            "- Each topic should have 2-3 exchanges between Alex and Jamie\n"
-            "- Keep responses informative but conversational\n"
-            "- Use natural transitions between topics\n"
-            "- Focus on the most impactful information\n"
-            "- IMPORTANT: Each line must start with either 'ALEX:' or 'JAMIE:' followed by their dialogue\n"
-            "- Do not include any other text or formatting\n"
-            "- Ensure the total script is long enough for a 3-4 minute podcast\n\n"
-            "Key Points:\n"
-        )
-        # Truncate combined_summary to fit within a safe token limit
-        max_tokens = 3500
-        summary_tokens = encoding.encode(combined_summary)
-        base_tokens = encoding.encode(base_prompt)
-        script_tokens = encoding.encode("Podcast Script:")
-        # Leave room for the model's response (e.g., 500 tokens)
-        max_summary_tokens = max_tokens - len(base_tokens) - len(script_tokens) - 500
-        if len(summary_tokens) > max_summary_tokens:
-            print(f"[DEBUG] Truncating combined_summary from {len(summary_tokens)} to {max_summary_tokens} tokens")
-            summary_tokens = summary_tokens[:max_summary_tokens]
-            combined_summary = encoding.decode(summary_tokens)
-        podcast_prompt = (
-            base_prompt + combined_summary + "\n\nPodcast Script:"
-        )
-        print(f"[DEBUG] podcast_prompt length (chars): {len(podcast_prompt)}")
-        print(f"[DEBUG] podcast_prompt token count: {len(encoding.encode(podcast_prompt))}")
-        gpt_response = openai_client.chat.completions.create(
+        # Directly send the prompt (already constructed in main.py) to the LLM
+        response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a financial analyst."},
-                {"role": "user", "content": podcast_prompt}
+                {"role": "user", "content": content}
             ],
             max_tokens=2048,
             temperature=0.5,
         )
-        script = gpt_response.choices[0].message.content.strip()
-        # Validate and fix the script format
-        lines = script.split('\n')
-        formatted_lines = []
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if not (line.startswith('ALEX:') or line.startswith('JAMIE:')):
-                if formatted_lines:
-                    formatted_lines[-1] = formatted_lines[-1] + ' ' + line
-                else:
-                    formatted_lines.append('ALEX: ' + line)
-            else:
-                formatted_lines.append(line)
-        summary = '\n'.join(formatted_lines)
+        summary = response.choices[0].message.content.strip()
         summary = html.unescape(summary)
-
-        # ENFORCE STRICT NUMBER USAGE: redact any numbers not in allowed_numbers
-        if allowed_numbers is not None:
-            summary, flagged = check_script_numbers_period_aware(summary, financials)
-            if flagged:
-                print("[WARNING] Some numbers in the script were not in the allowed set and were redacted!")
-
         elapsed = time.time() - start_time
-        print(f"[Timing] Summarization (all chunks + final) took {elapsed:.2f} seconds")
+        print(f"[Timing] Summarization took {elapsed:.2f} seconds")
         return summary
 
     @staticmethod
