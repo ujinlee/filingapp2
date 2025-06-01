@@ -220,11 +220,42 @@ class SummarizationAgent:
     @staticmethod
     def extract_mda_section(content: str) -> str:
         """
-        Extract the Management's Discussion and Analysis (MDA) section from the filing text.
-        Looks for common MDA section headers and extracts until the next major section.
+        Extract the Management's Discussion and Analysis (MDA) section from the filing HTML or text.
+        First tries to parse the HTML for common MDA headers, then falls back to regex on plain text.
         """
         import re
-        # Try to find the MDA section using common headers
+        from bs4 import BeautifulSoup
+        # Try HTML parsing first
+        try:
+            soup = BeautifulSoup(content, 'html.parser')
+            # Look for tags that might contain the MDA header
+            header_tags = soup.find_all(['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span'])
+            mda_start_tag = None
+            for tag in header_tags:
+                if tag.get_text(strip=True).lower().startswith("management's discussion and analysis") or \
+                   tag.get_text(strip=True).lower().startswith("management's discussion and analysis") or \
+                   tag.get_text(strip=True).lower().startswith("item 2") or \
+                   tag.get_text(strip=True).lower().startswith("item 7"):
+                    mda_start_tag = tag
+                    break
+            if mda_start_tag:
+                # Collect all text from this tag until the next big header
+                mda_text = []
+                for sibling in mda_start_tag.next_siblings:
+                    if sibling.name and sibling.name in ['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span']:
+                        # Stop at the next major section
+                        break
+                    if hasattr(sibling, 'get_text'):
+                        mda_text.append(sibling.get_text(" ", strip=True))
+                    elif isinstance(sibling, str):
+                        mda_text.append(sibling.strip())
+                mda_section = mda_start_tag.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
+                if len(mda_section) > 100:
+                    print(f"[extract_mda_section] Extracted MDA section from HTML (first 500 chars): {mda_section[:500]}")
+                    return mda_section.strip()
+        except Exception as e:
+            print(f"[extract_mda_section] HTML parsing failed: {e}")
+        # Fallback to regex on plain text
         mda_patterns = [
             r"management[’'`]s discussion and analysis[\s\S]{0,100}?of financial condition and results of operations",
             r"management[’'`]s discussion and analysis",
@@ -242,16 +273,18 @@ class SummarizationAgent:
                 mda_start = match.start()
                 break
         if mda_start is None:
+            print("[extract_mda_section] MDA section not found in HTML or text.")
             return "[MDA section not found in filing.]"
         mda_text = content[mda_start:]
-        # Find the end of the MDA section
         mda_end = len(mda_text)
         for pat in end_patterns:
             match = re.search(pat, mda_text.lower())
             if match:
                 mda_end = match.start()
                 break
-        return mda_text[:mda_end].strip()
+        mda_section = mda_text[:mda_end].strip()
+        print(f"[extract_mda_section] Extracted MDA section from text (first 500 chars): {mda_section[:500]}")
+        return mda_section
 
 class TranslationAgent:
     _translation_cache = {}
