@@ -108,23 +108,24 @@ async def summarize_filing(request: SummarizeRequest):
 
         # 6. Build the LLM prompt with both numbers and MDA
         prompt = (
-            f"Here is the MDA section from the filing:\n\n{{mda_text}}\n\n"
-            "Please create a short, podcast-style script (with Alex and Jamie) that only summarizes the real facts and numbers in this text. "
+            f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
+            "Please create a podcast-style script (with Alex and Jamie) that is 3-4 minutes long, covering all real facts, numbers, and key points in this text. "
             "Do not invent or guess customer names, details, or numbers not present in the text. "
-            "Keep the script concise and human-like. "
+            "If the text does not explicitly name a customer, do not refer to them as Customer A, Customer B, Customer C, or any similar placeholder. Only discuss customers in aggregate or as described in the text. If you are unsure, omit the detail. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation. "
             "Do NOT mention the MDA section or Management's Discussion and Analysis by name. Just incorporate its insights naturally. "
             "Make the discussion engaging and insightful, focusing on what drove the numbers, company strategy, and any forward-looking statements.\n\n"
             f"Official numbers for the period:\n"
             f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
-            f"MDA section from the filing:\n"
-            f"{mda_section}\n\n"
             "Begin the podcast script now."
         )
 
         # 7. Summarize
         summary = SummarizationAgent.summarize(prompt)
+
+        # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
+        summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
 
         # 8. Translate
         try:
