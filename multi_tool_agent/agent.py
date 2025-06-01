@@ -360,6 +360,7 @@ class TTSAgent:
     
     @staticmethod
     def _naturalize_text(text):
+        import re
         # Convert years like 2025 to 'twenty twenty-five'
         def year_to_words(match):
             year = int(match.group())
@@ -378,7 +379,13 @@ class TTSAgent:
         # Convert currency and large numbers to words (e.g., $104.169 billion -> one hundred four billion dollars)
         p = inflect.engine()
         def currency_to_words(match):
-            num = float(match.group(1).replace(',', ''))
+            num_str = match.group(1).replace(',', '')
+            # Remove trailing non-numeric characters (like a period)
+            num_str = re.sub(r'[^\d.-]+$', '', num_str)
+            try:
+                num = float(num_str)
+            except Exception:
+                num = 0
             unit = match.group(2)
             if unit:
                 unit = unit.lower()
