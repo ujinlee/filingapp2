@@ -109,13 +109,12 @@ async def summarize_filing(request: SummarizeRequest):
         # 6. Build the LLM prompt with both numbers and MDA
         prompt = (
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
-            "Please create a podcast-style script (with Alex and Jamie) that is 3-4 minutes long, covering all real facts, numbers, and key points in this text. "
-            "Do not invent or guess customer names, details, or numbers not present in the text. "
-            "If the text does not explicitly name a customer, do not refer to them as Customer A, Customer B, Customer C, or any similar placeholder. Only discuss customers in aggregate or as described in the text. If you are unsure, omit the detail. "
+            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, covering all real facts, numbers, and key points in this text from multiple angles (e.g., financials, strategy, risks, outlook, etc.). "
+            "Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
-            "Alternate lines between ALEX and JAMIE for a natural conversation. "
+            "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
             "Do NOT mention the MDA section or Management's Discussion and Analysis by name. Just incorporate its insights naturally. "
-            "Make the discussion engaging and insightful, focusing on what drove the numbers, company strategy, and any forward-looking statements.\n\n"
+            "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
             f"Official numbers for the period:\n"
             f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
             "Begin the podcast script now."
@@ -130,11 +129,17 @@ async def summarize_filing(request: SummarizeRequest):
         # 8. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
-            # Normalize speaker tags in the translated script
-            transcript = re.sub(r'^[*\s]*ALEX[*\s]*:', 'ALEX:', transcript, flags=re.MULTILINE | re.IGNORECASE)
-            transcript = re.sub(r'^[*\s]*JAMIE[*\s]*:', 'JAMIE:', transcript, flags=re.MULTILINE | re.IGNORECASE)
-            # Ensure 'Filing Talk' is always in English
-            transcript = re.sub(r'(Filing\s*Talk|Filingtalk|Filing-Talk|Filing\s+Talk)', 'Filing Talk', transcript, flags=re.IGNORECASE)
+            # After translation, enforce strict alternation of speaker tags, always starting with ALEX
+            lines = transcript.split('\n')
+            normalized_lines = []
+            speaker = 'ALEX'
+            for line in lines:
+                if re.match(r'^(ALEX:|JAMIE:)', line, re.IGNORECASE):
+                    normalized_lines.append(f"{speaker}: {re.sub(r'^(ALEX:|JAMIE:)', '', line, flags=re.IGNORECASE).strip()}")
+                    speaker = 'JAMIE' if speaker == 'ALEX' else 'ALEX'
+                else:
+                    normalized_lines.append(line)
+            transcript = '\n'.join(normalized_lines)
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
                 print("[main] Translation failed or fell back to English, using English TTS.")
