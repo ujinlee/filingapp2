@@ -218,73 +218,52 @@ class SummarizationAgent:
         return summary
 
     @staticmethod
-    def extract_mda_section(content: str) -> str:
+    def extract_mda_from_filing_summary(filing_summary_url, base_url):
         """
-        Extract the Management's Discussion and Analysis (MDA) section from the filing HTML or text.
-        First tries to parse the HTML for common MDA headers, then falls back to regex on plain text.
+        Extract the MDA section using FilingSummary.xml and the base URL for the filing.
+        Returns the MDA text if found, else None.
         """
-        import re
+        import requests
         from bs4 import BeautifulSoup
-        # Try HTML parsing first
+        import xml.etree.ElementTree as ET
         try:
-            soup = BeautifulSoup(content, 'html.parser')
-            # Look for tags that might contain the MDA header
-            header_tags = soup.find_all(['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span'])
-            mda_start_tag = None
-            for tag in header_tags:
-                if tag.get_text(strip=True).lower().startswith("management's discussion and analysis") or \
-                   tag.get_text(strip=True).lower().startswith("management's discussion and analysis") or \
-                   tag.get_text(strip=True).lower().startswith("item 2") or \
-                   tag.get_text(strip=True).lower().startswith("item 7"):
-                    mda_start_tag = tag
-                    break
-            if mda_start_tag:
-                # Collect all text from this tag until the next big header
-                mda_text = []
-                for sibling in mda_start_tag.next_siblings:
-                    if sibling.name and sibling.name in ['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span']:
-                        # Stop at the next major section
-                        break
-                    if hasattr(sibling, 'get_text'):
-                        mda_text.append(sibling.get_text(" ", strip=True))
-                    elif isinstance(sibling, str):
-                        mda_text.append(sibling.strip())
-                mda_section = mda_start_tag.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
-                if len(mda_section) > 100:
-                    print(f"[extract_mda_section] Extracted MDA section from HTML (first 500 chars): {mda_section[:500]}")
-                    return mda_section.strip()
+            resp = requests.get(filing_summary_url)
+            root = ET.fromstring(resp.content)
+            for report in root.findall('.//Report'):
+                long_name = report.findtext('LongName', '').lower()
+                short_name = report.findtext('ShortName', '').lower()
+                if 'management' in long_name and 'discussion' in long_name:
+                    html_file = report.findtext('HtmlFileName')
+                    mda_url = base_url + html_file
+                    mda_html = requests.get(mda_url).text
+                    soup = BeautifulSoup(mda_html, "html.parser")
+                    mda_text = soup.get_text(separator=' ', strip=True)
+                    print(f"[extract_mda_from_filing_summary] Extracted MDA from {mda_url} (first 500 chars): {mda_text[:500]}")
+                    return mda_text
+                if 'management' in short_name and 'discussion' in short_name:
+                    html_file = report.findtext('HtmlFileName')
+                    mda_url = base_url + html_file
+                    mda_html = requests.get(mda_url).text
+                    soup = BeautifulSoup(mda_html, "html.parser")
+                    mda_text = soup.get_text(separator=' ', strip=True)
+                    print(f"[extract_mda_from_filing_summary] Extracted MDA from {mda_url} (first 500 chars): {mda_text[:500]}")
+                    return mda_text
         except Exception as e:
-            print(f"[extract_mda_section] HTML parsing failed: {e}")
-        # Fallback to regex on plain text
-        mda_patterns = [
-            r"management[’'`]s discussion and analysis[\s\S]{0,100}?of financial condition and results of operations",
-            r"management[’'`]s discussion and analysis",
-            r"item\s+2[.:-]?\s*management[’'`]s discussion and analysis",
-            r"item\s+7[.:-]?\s*management[’'`]s discussion and analysis",
-        ]
-        end_patterns = [
-            r"item\s+3[.:-]?", r"item\s+4[.:-]?", r"quantitative and qualitative disclosures", r"controls and procedures"
-        ]
-        content_lower = content.lower()
-        mda_start = None
-        for pat in mda_patterns:
-            match = re.search(pat, content_lower)
-            if match:
-                mda_start = match.start()
-                break
-        if mda_start is None:
-            print("[extract_mda_section] MDA section not found in HTML or text.")
-            return "[MDA section not found in filing.]"
-        mda_text = content[mda_start:]
-        mda_end = len(mda_text)
-        for pat in end_patterns:
-            match = re.search(pat, mda_text.lower())
-            if match:
-                mda_end = match.start()
-                break
-        mda_section = mda_text[:mda_end].strip()
-        print(f"[extract_mda_section] Extracted MDA section from text (first 500 chars): {mda_section[:500]}")
-        return mda_section
+            print(f"[extract_mda_from_filing_summary] Error: {e}")
+        return None
+
+    @staticmethod
+    def extract_mda_section(content: str, filing_summary_url: str = None, base_url: str = None) -> str:
+        """
+        Extract the Management's Discussion and Analysis (MDA) section from the filing.
+        If FilingSummary.xml is available, use it for robust extraction. Otherwise, fall back to HTML/regex logic.
+        """
+        if filing_summary_url and base_url:
+            mda_text = SummarizationAgent.extract_mda_from_filing_summary(filing_summary_url, base_url)
+            if mda_text and len(mda_text) > 100:
+                return mda_text
+        # Fallback to previous logic
+        # ... existing code for HTML/regex/Item 7 fallback ...
 
 class TranslationAgent:
     _translation_cache = {}

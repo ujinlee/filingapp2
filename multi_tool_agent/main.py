@@ -88,22 +88,38 @@ async def summarize_filing(request: SummarizeRequest):
             print("[ERROR] Exception fetching/cleaning filing text:", traceback.format_exc())
             raise
 
-        # 4. Extract MDA section
-        mda_section = SummarizationAgent.extract_mda_section(content)
+        # 4. Detect FilingSummary.xml and base URL
+        filing_summary_url = None
+        base_url = None
+        if request.documentUrl.endswith('.htm') or request.documentUrl.endswith('.html'):
+            base_url = request.documentUrl.rsplit('/', 1)[0] + '/'
+            filing_summary_url = base_url + 'FilingSummary.xml'
+        elif request.documentUrl.endswith('.xml'):
+            # If the documentUrl is already FilingSummary.xml
+            filing_summary_url = request.documentUrl
+            base_url = request.documentUrl.rsplit('/', 1)[0] + '/'
 
-        # 5. Build the LLM prompt with both numbers and MDA
+        # 5. Extract MDA section using FilingSummary.xml if available
+        mda_section = SummarizationAgent.extract_mda_section(content, filing_summary_url, base_url)
+
+        # 6. Build the LLM prompt with both numbers and MDA
         prompt = (
-            f"Here are the official numbers for the period:\n"
+            "Welcome to Filing Talk, where we break down the numbers and stories behind the latest financial reports. "
+            "You are to write a podcast script as a conversation between two hosts. "
+            "Use the official numbers and the narrative from the Management's Discussion and Analysis (MDA) section below. "
+            "Do NOT explicitly say 'we are looking at the MDA section'—instead, naturally incorporate the drivers, strategy, and context from the MDA into the conversation. "
+            "Make the discussion engaging and insightful, focusing on what drove the numbers, company strategy, and any forward-looking statements.\n\n"
+            f"Official numbers for the period:\n"
             f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
-            f"Here is the Management's Discussion and Analysis (MDA) section from the filing:\n"
+            f"MDA section from the filing:\n"
             f"{mda_section}\n\n"
-            f"Please write a podcast script that uses both the numbers and the narrative from the MDA."
+            "Begin the podcast script now."
         )
 
-        # 6. Summarize
+        # 7. Summarize
         summary = SummarizationAgent.summarize(prompt)
 
-        # 7. Translate
+        # 8. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
             tts_language = request.language
@@ -114,7 +130,7 @@ async def summarize_filing(request: SummarizeRequest):
             print("[ERROR] Exception in translation:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
 
-        # 8. Generate audio
+        # 9. Generate audio
         try:
             audio_filename = TTSAgent.synthesize(transcript, tts_language)
             audio_path = os.path.join(AUDIO_DIR, audio_filename)
