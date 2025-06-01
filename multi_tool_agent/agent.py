@@ -242,55 +242,29 @@ class SummarizationAgent:
                     mda_url = base_url + html_file
                     mda_html = requests.get(mda_url).text
                     soup = BeautifulSoup(mda_html, "html.parser")
-                    # If there's an anchor in the HtmlFileName, extract only that section
-                    if '#' in html_file:
-                        anchor = html_file.split('#', 1)[1]
-                        section = soup.find(id=anchor) or soup.find(name='a', attrs={'name': anchor})
-                        if section:
-                            # Extract all content after the anchor until the next major section header
-                            mda_text = []
-                            for sibling in section.next_siblings:
-                                if hasattr(sibling, 'get_text'):
-                                    text = sibling.get_text(" ", strip=True)
-                                elif isinstance(sibling, str):
-                                    text = sibling.strip()
-                                else:
-                                    continue
-                                # Stop at next major section header
-                                if re.search(r'item\s+7a|item\s+8|quantitative and qualitative disclosures|controls and procedures', text, re.I):
-                                    break
-                                mda_text.append(text)
-                            mda_section = section.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
-                            print(f"[extract_mda_from_filing_summary] Extracted MDA section by anchor (first 500 chars): {mda_section[:500]}")
-                            return mda_section
-                    # Otherwise, search for the MDA header in the HTML and extract content after it
+                    # Improved: Find all possible MDA headers, skip TOC, extract narrative
+                    header_tags = soup.find_all(lambda tag: tag.name in ["b", "strong", "h1", "h2", "h3", "h4", "p", "a", "div", "span"])
                     mda_header = None
-                    header_tags = soup.find_all(['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span'])
                     for tag in header_tags:
-                        tag_text = tag.get_text(strip=True).lower()
-                        if 'management' in tag_text and 'discussion' in tag_text:
+                        text = tag.get_text(separator=" ", strip=True).lower()
+                        if re.search(r"management.?s discussion", text):
+                            siblings = list(tag.find_next_siblings())
+                            if len(siblings) >= 2 and all(len(s.get_text(strip=True)) < 100 for s in siblings[:2]):
+                                continue  # Probably TOC, skip
                             mda_header = tag
                             break
-                    if mda_header:
-                        mda_text = []
-                        for sibling in mda_header.next_siblings:
-                            if hasattr(sibling, 'get_text'):
-                                text = sibling.get_text(" ", strip=True)
-                            elif isinstance(sibling, str):
-                                text = sibling.strip()
-                            else:
-                                continue
-                            # Stop at next major section header
-                            if re.search(r'item\s+7a|item\s+8|quantitative and qualitative disclosures|controls and procedures', text, re.I):
-                                break
-                            mda_text.append(text)
-                        mda_section = mda_header.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
-                        print(f"[extract_mda_from_filing_summary] Extracted MDA section from HTML (first 500 chars): {mda_section[:500]}")
-                        return mda_section
-                    # Fallback: extract all text if no header found
-                    mda_text = soup.get_text(separator=' ', strip=True)
-                    print(f"[extract_mda_from_filing_summary] Fallback: Extracted all text from {mda_url} (first 500 chars): {mda_text[:500]}")
-                    return mda_text
+                    if not mda_header:
+                        print("[extract_mda_from_filing_summary] No MDA heading found.")
+                        return None
+                    mda_text = ""
+                    for sibling in mda_header.find_next_siblings():
+                        sibling_text = sibling.get_text(separator=" ", strip=True)
+                        if re.search(r"item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures", sibling_text, re.I):
+                            break
+                        mda_text += sibling_text + " "
+                    mda_text = mda_text.strip()
+                    print(f"[extract_mda_from_filing_summary] Extracted MDA narrative (first 500 chars): {mda_text[:500]}")
+                    return mda_text if mda_text else None
         except Exception as e:
             print(f"[extract_mda_from_filing_summary] Error: {e}")
         return None
@@ -306,33 +280,32 @@ class SummarizationAgent:
             mda_text = SummarizationAgent.extract_mda_from_filing_summary(filing_summary_url, base_url)
             if mda_text and len(mda_text) > 100:
                 return mda_text
-        # Fallback to previous logic (HTML/regex/Item 7 fallback)
+        # Fallback to improved HTML/regex logic
         import re
         from bs4 import BeautifulSoup
         print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
-        # Try HTML parsing for common headers
         try:
             soup = BeautifulSoup(content, 'html.parser')
-            header_tags = soup.find_all(['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span'])
-            mda_start_tag = None
+            header_tags = soup.find_all(lambda tag: tag.name in ["b", "strong", "h1", "h2", "h3", "h4", "p", "a", "div", "span"])
+            mda_header = None
             for tag in header_tags:
-                tag_text = tag.get_text(strip=True).lower()
-                if 'management' in tag_text and 'discussion' in tag_text:
-                    mda_start_tag = tag
+                text = tag.get_text(separator=" ", strip=True).lower()
+                if re.search(r"management.?s discussion", text):
+                    siblings = list(tag.find_next_siblings())
+                    if len(siblings) >= 2 and all(len(s.get_text(strip=True)) < 100 for s in siblings[:2]):
+                        continue  # Probably TOC, skip
+                    mda_header = tag
                     break
-            if mda_start_tag:
-                mda_text = []
-                for sibling in mda_start_tag.next_siblings:
-                    if sibling.name and sibling.name in ['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span']:
+            if mda_header:
+                mda_text = ""
+                for sibling in mda_header.find_next_siblings():
+                    sibling_text = sibling.get_text(separator=" ", strip=True)
+                    if re.search(r"item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures", sibling_text, re.I):
                         break
-                    if hasattr(sibling, 'get_text'):
-                        mda_text.append(sibling.get_text(" ", strip=True))
-                    elif isinstance(sibling, str):
-                        mda_text.append(sibling.strip())
-                mda_section = mda_start_tag.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
-                if len(mda_section) > 100:
-                    print(f"[extract_mda_section] Extracted MDA section from HTML (first 500 chars): {mda_section[:500]}")
-                    return mda_section.strip()
+                    mda_text += sibling_text + " "
+                mda_text = mda_text.strip()
+                print(f"[extract_mda_section] Extracted MDA narrative (first 500 chars): {mda_text[:500]}")
+                return mda_text if mda_text else "[MDA section not found in filing.]"
         except Exception as e:
             print(f"[extract_mda_section] HTML parsing failed: {e}")
         # Regex fallback
@@ -551,7 +524,7 @@ class TTSAgent:
             raise Exception("Input text for TTS is empty or invalid.")
         # Fix common LLM mistakes in speaker tags
         text = re.sub(r'^(Host\s*1:|Host\s*one:)', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
-        text = re.sub(r'^(Host\s*2:|Host\s*two:)', 'SYDNEY:', text, flags=re.MULTILINE | re.IGNORECASE)
+        text = re.sub(r'^(Host\s*2:|Host\s*two:)', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
         # Split text into speaker segments, but also split long segments by sentence
         parts = []
         current_speaker = None
@@ -560,14 +533,12 @@ class TTSAgent:
             line = line.strip()
             if not line or not re.search(r'\w', line):
                 continue
-            # Change 'JAMIE' to 'SYDNEY'
+            # Change 'SYDNEY' to 'JAMIE' for backward compatibility
             if line.startswith('ALEX:'):
                 if current_speaker and current_text:
                     segment = ' '.join(current_text)
-                    # Further split by sentence if too long
                     for sent in re.split(r'(?<=[.!?]) +', segment):
                         if sent.strip():
-                            # Further split long sentences
                             if len(sent) > 300:
                                 for chunk in re.split(r'[,;] ', sent):
                                     if chunk.strip():
@@ -584,10 +555,10 @@ class TTSAgent:
                             if len(sent) > 300:
                                 for chunk in re.split(r'[,;] ', sent):
                                     if chunk.strip():
-                                        parts.append(('SYDNEY', chunk.strip()))
+                                        parts.append(('JAMIE', chunk.strip()))
                             else:
-                                parts.append(('SYDNEY', sent.strip()))
-                current_speaker = 'SYDNEY'
+                                parts.append(('JAMIE', sent.strip()))
+                current_speaker = 'JAMIE'
                 if line.startswith('JAMIE:'):
                     current_text = [line[6:].strip()]
                 else:
@@ -604,6 +575,7 @@ class TTSAgent:
                                 parts.append((current_speaker, chunk.strip()))
                     else:
                         parts.append((current_speaker, sent.strip()))
+        print(f"[TTSAgent] Speaker segments: {[(speaker, segment[:40]) for speaker, segment in parts]}")
         def add_sentence_pauses(text):
             return re.sub(r'([.!?])', r'\1<break time="400ms"/>', text)
         audio_segments = []

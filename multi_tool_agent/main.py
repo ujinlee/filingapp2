@@ -108,8 +108,8 @@ async def summarize_filing(request: SummarizeRequest):
         # 6. Build the LLM prompt with both numbers and MDA
         prompt = (
             "Welcome to Filing Talk, where we break down the numbers and stories behind the latest financial reports. "
-            "You are to write a podcast script as a conversation between two hosts named ALEX and SYDNEY. "
-            "Each line of dialogue must start with either 'ALEX:' or 'SYDNEY:' (all caps, followed by a colon). Do not use any other speaker names or formats. "
+            "You are to write a podcast script as a conversation between two hosts named ALEX and JAMIE. "
+            "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon). Alternate lines between ALEX and JAMIE for a natural conversation. Do not use any other speaker names or formats. "
             "Use the official numbers and the narrative from the Management's Discussion and Analysis (MDA) section below. "
             "Do NOT explicitly say 'we are looking at the MDA section'—instead, naturally incorporate the drivers, strategy, and context from the MDA into the conversation. "
             "Make the discussion engaging and insightful, focusing on what drove the numbers, company strategy, and any forward-looking statements.\n\n"
