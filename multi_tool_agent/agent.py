@@ -361,6 +361,7 @@ class TTSAgent:
     @staticmethod
     def _naturalize_text(text):
         import re
+        p = inflect.engine()
         # Convert years like 2025 to 'twenty twenty-five'
         def year_to_words(match):
             year = int(match.group())
@@ -376,11 +377,9 @@ class TTSAgent:
         text = re.sub(r'20[0-9]{2}', year_to_words, text)
         # Replace 10-Q and 10-K with 'ten Q' and 'ten K'
         text = re.sub(r'10-([QK])', r'ten \1', text, flags=re.IGNORECASE)
-        # Convert currency and large numbers to words (e.g., $104.169 billion -> one hundred four billion dollars)
-        p = inflect.engine()
+        # Convert currency and large numbers to words (e.g., $44 billion -> forty-four billion dollars)
         def currency_to_words(match):
             num_str = match.group(1).replace(',', '')
-            # Remove trailing non-numeric characters (like a period)
             num_str = re.sub(r'[^\d.-]+$', '', num_str)
             try:
                 num = float(num_str)
@@ -390,23 +389,22 @@ class TTSAgent:
             if unit:
                 unit = unit.lower()
                 if unit.startswith('b'):
-                    num = int(num)
-                    return f"{p.number_to_words(num, andword='', zero='zero', group=1)} billion dollars"
+                    return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} billion dollars"
                 elif unit.startswith('m'):
-                    num = int(num)
-                    return f"{p.number_to_words(num, andword='', zero='zero', group=1)} million dollars"
+                    return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} million dollars"
             return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} dollars"
-        # $104.169 billion, $104 billion, $104,169,000,000
         text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
-        # Convert large numbers to words (e.g., 1000000 -> one million)
+        # Convert all numbers (not just 4+ digits) to words, except years
         def number_to_words(match):
             num = int(match.group())
-            if num >= 1000:
-                return p.number_to_words(num, andword='', zero='zero', group=1)
-            return str(num)
-        text = re.sub(r'\b\d{4,}\b', number_to_words, text)
+            # Avoid converting years again
+            if 2000 <= num <= 2099:
+                return str(num)
+            return p.number_to_words(num, andword='', zero='zero', group=1)
+        text = re.sub(r'\b\d+\b', number_to_words, text)
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
+        print(f"[TTSAgent] Processed text for TTS: {text}")
         return text
     
     @staticmethod
