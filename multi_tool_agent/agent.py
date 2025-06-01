@@ -540,9 +540,11 @@ class TTSAgent:
         if not text or not re.search(r'\w', text):
             print("[TTSAgent] Input text is empty or only punctuation/whitespace. Aborting TTS synthesis.")
             raise Exception("Input text for TTS is empty or invalid.")
-        # Fix common LLM mistakes in speaker tags
-        text = re.sub(r'^(Host\s*1:|Host\s*one:)', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
-        text = re.sub(r'^(Host\s*2:|Host\s*two:)', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
+        # Post-process to fix minor tag formatting issues before splitting
+        text = re.sub(r'^(alex|jamie)\s*:?\s*', lambda m: m.group(1).upper() + ':', text, flags=re.MULTILINE)
+        # Also fix common mistakes (e.g., lowercase, missing colon, extra spaces)
+        text = re.sub(r'^(host\s*1:|host\s*one:)', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
+        text = re.sub(r'^(host\s*2:|host\s*two:)', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
         # Restore original splitting logic: split by ALEX: and JAMIE: only, no forced alternation
         parts = []
         current_speaker = None
