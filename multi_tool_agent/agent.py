@@ -396,12 +396,13 @@ class TTSAgent:
         text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
         # Convert all numbers (not just 4+ digits) to words, except years
         def number_to_words(match):
-            num = int(match.group())
+            num = int(match.group(0))
             # Avoid converting years again
             if 2000 <= num <= 2099:
                 return str(num)
             return p.number_to_words(num, andword='', zero='zero', group=1)
-        text = re.sub(r'\b\d+\b', number_to_words, text)
+        # Only match numbers that are not part of a larger word
+        text = re.sub(r'(?<!\w)(\d{1,})(?!\w)', number_to_words, text)
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
         print(f"[TTSAgent] Processed text for TTS: {text}")
