@@ -225,26 +225,31 @@ class SummarizationAgent:
         """
         import requests
         from bs4 import BeautifulSoup
-        import xml.etree.ElementTree as ET
+        from lxml import etree
         try:
             resp = requests.get(filing_summary_url)
-            root = ET.fromstring(resp.content)
+            parser = etree.XMLParser(recover=True)
+            root = etree.fromstring(resp.content, parser=parser)
             for report in root.findall('.//Report'):
-                long_name = report.findtext('LongName', '').lower()
-                short_name = report.findtext('ShortName', '').lower()
-                if 'management' in long_name and 'discussion' in long_name:
+                long_name = report.findtext('LongName', '').lower() if report.findtext('LongName') else ''
+                short_name = report.findtext('ShortName', '').lower() if report.findtext('ShortName') else ''
+                if 'management' in long_name and 'discussion' in long_name or \
+                   'management' in short_name and 'discussion' in short_name:
                     html_file = report.findtext('HtmlFileName')
+                    if not html_file:
+                        continue
                     mda_url = base_url + html_file
                     mda_html = requests.get(mda_url).text
                     soup = BeautifulSoup(mda_html, "html.parser")
-                    mda_text = soup.get_text(separator=' ', strip=True)
-                    print(f"[extract_mda_from_filing_summary] Extracted MDA from {mda_url} (first 500 chars): {mda_text[:500]}")
-                    return mda_text
-                if 'management' in short_name and 'discussion' in short_name:
-                    html_file = report.findtext('HtmlFileName')
-                    mda_url = base_url + html_file
-                    mda_html = requests.get(mda_url).text
-                    soup = BeautifulSoup(mda_html, "html.parser")
+                    # If there's an anchor in the HtmlFileName, extract only that section
+                    if '#' in html_file:
+                        anchor = html_file.split('#', 1)[1]
+                        section = soup.find(id=anchor) or soup.find(name='a', attrs={'name': anchor})
+                        if section:
+                            mda_text = section.get_text(separator=' ', strip=True)
+                            print(f"[extract_mda_from_filing_summary] Extracted MDA section by anchor (first 500 chars): {mda_text[:500]}")
+                            return mda_text
+                    # Otherwise, extract the full HTML text
                     mda_text = soup.get_text(separator=' ', strip=True)
                     print(f"[extract_mda_from_filing_summary] Extracted MDA from {mda_url} (first 500 chars): {mda_text[:500]}")
                     return mda_text
