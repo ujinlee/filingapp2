@@ -101,6 +101,7 @@ async def summarize_filing(request: SummarizeRequest):
 
         # 5. Extract MDA section using FilingSummary.xml if available
         mda_section = SummarizationAgent.extract_mda_section(content, filing_summary_url, base_url)
+        print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
 
         # 6. Build the LLM prompt with both numbers and MDA
         prompt = (

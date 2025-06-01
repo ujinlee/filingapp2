@@ -427,6 +427,7 @@ class TTSAgent:
     
     @staticmethod
     def synthesize(text: str, language: str) -> str:
+        import re
         start_time = time.time()
         print(f"[TTSAgent] Starting synthesis for language: {language}")
         client = texttospeech.TextToSpeechClient()
@@ -442,30 +443,50 @@ class TTSAgent:
             line = line.strip()
             if not line or not re.search(r'\w', line):
                 continue
+            # Change 'JAMIE' to 'SYDNEY'
             if line.startswith('ALEX:'):
                 if current_speaker and current_text:
-                    # Further split by sentence if too long
                     segment = ' '.join(current_text)
+                    # Further split by sentence if too long
                     for sent in re.split(r'(?<=[.!?]) +', segment):
                         if sent.strip():
-                            parts.append((current_speaker, sent.strip()))
+                            # Further split long sentences
+                            if len(sent) > 300:
+                                for chunk in re.split(r'[,;] ', sent):
+                                    if chunk.strip():
+                                        parts.append((current_speaker, chunk.strip()))
+                            else:
+                                parts.append((current_speaker, sent.strip()))
                 current_speaker = 'ALEX'
                 current_text = [line[5:].strip()]
-            elif line.startswith('JAMIE:'):
+            elif line.startswith('JAMIE:') or line.startswith('SYDNEY:'):
                 if current_speaker and current_text:
                     segment = ' '.join(current_text)
                     for sent in re.split(r'(?<=[.!?]) +', segment):
                         if sent.strip():
-                            parts.append((current_speaker, sent.strip()))
-                current_speaker = 'JAMIE'
-                current_text = [line[6:].strip()]
+                            if len(sent) > 300:
+                                for chunk in re.split(r'[,;] ', sent):
+                                    if chunk.strip():
+                                        parts.append(('SYDNEY', chunk.strip()))
+                            else:
+                                parts.append(('SYDNEY', sent.strip()))
+                current_speaker = 'SYDNEY'
+                if line.startswith('JAMIE:'):
+                    current_text = [line[6:].strip()]
+                else:
+                    current_text = [line[7:].strip()]
             else:
                 current_text.append(line)
         if current_speaker and current_text:
             segment = ' '.join(current_text)
             for sent in re.split(r'(?<=[.!?]) +', segment):
                 if sent.strip():
-                    parts.append((current_speaker, sent.strip()))
+                    if len(sent) > 300:
+                        for chunk in re.split(r'[,;] ', sent):
+                            if chunk.strip():
+                                parts.append((current_speaker, chunk.strip()))
+                    else:
+                        parts.append((current_speaker, sent.strip()))
         def add_sentence_pauses(text):
             return re.sub(r'([.!?])', r'\1<break time="400ms"/>', text)
         audio_segments = []
