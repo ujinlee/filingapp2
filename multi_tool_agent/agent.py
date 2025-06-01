@@ -538,6 +538,15 @@ class TTSAgent:
         text = re.sub(r'^[*\s]*JAMIE[*\s]*:', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
         # Ensure NVIDIA is read as 'Nvidia', not spelled out
         text = re.sub(r'N[\- ]?V[\- ]?D[\- ]?I[\- ]?A', 'Nvidia', text, flags=re.IGNORECASE)
+        # General rule: collapse any all-caps, spaced, dashed, or dotted company name to its normal form
+        def collapse_spelled_company(match):
+            word = match.group(0)
+            # Remove spaces, dashes, dots, and make title case
+            return word.replace(' ', '').replace('-', '').replace('.', '').title()
+        # Match patterns like 'N V I D I A', 'A P P L E', 'M I C R O S O F T', etc.
+        text = re.sub(r'\b([A-Z](?:[\s\-\.][A-Z])+[A-Z])\b', collapse_spelled_company, text)
+        # Also replace all-caps 'NVIDIA' with 'Nvidia'
+        text = re.sub(r'\bNVIDIA\b', 'Nvidia', text, flags=re.IGNORECASE)
         print(f"[TTSAgent] Processed text for TTS: {text}")
         return text
     

@@ -108,14 +108,13 @@ async def summarize_filing(request: SummarizeRequest):
 
         # 6. Build the LLM prompt with both numbers and MDA
         prompt = (
-            "Welcome to Filing Talk, where we break down the numbers and stories behind the latest financial reports. "
-            "You are to write a podcast script as a conversation between two hosts named ALEX and JAMIE. "
+            f"Here is the MDA section from the filing:\n\n{{mda_text}}\n\n"
+            "Please create a short, podcast-style script (with Alex and Jamie) that only summarizes the real facts and numbers in this text. "
+            "Do not invent or guess customer names, details, or numbers not present in the text. "
+            "Keep the script concise and human-like. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation. "
-            "Summarize and naturally weave in the most important points and drivers from the MDA section below, rather than copying it verbatim. Focus on what drove the numbers, company strategy, and any forward-looking statements. "
             "Do NOT mention the MDA section or Management's Discussion and Analysis by name. Just incorporate its insights naturally. "
-            "Do NOT invent or speculate about customer names, products, or other details not explicitly provided in the MDA section or official numbers. Only use information that is present in the provided text. "
-            "Use the official numbers and the narrative from the Management's Discussion and Analysis (MDA) section below. "
             "Make the discussion engaging and insightful, focusing on what drove the numbers, company strategy, and any forward-looking statements.\n\n"
             f"Official numbers for the period:\n"
             f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
