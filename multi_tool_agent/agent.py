@@ -262,13 +262,89 @@ class SummarizationAgent:
         """
         Extract the Management's Discussion and Analysis (MDA) section from the filing.
         If FilingSummary.xml is available, use it for robust extraction. Otherwise, fall back to HTML/regex logic.
+        If all else fails, use a fallback: scan for the longest section containing both 'management' and 'discussion'.
         """
         if filing_summary_url and base_url:
             mda_text = SummarizationAgent.extract_mda_from_filing_summary(filing_summary_url, base_url)
             if mda_text and len(mda_text) > 100:
                 return mda_text
-        # Fallback to previous logic
-        # ... existing code for HTML/regex/Item 7 fallback ...
+        # Fallback to previous logic (HTML/regex/Item 7 fallback)
+        import re
+        from bs4 import BeautifulSoup
+        print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
+        # Try HTML parsing for common headers
+        try:
+            soup = BeautifulSoup(content, 'html.parser')
+            header_tags = soup.find_all(['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span'])
+            mda_start_tag = None
+            for tag in header_tags:
+                tag_text = tag.get_text(strip=True).lower()
+                if 'management' in tag_text and 'discussion' in tag_text:
+                    mda_start_tag = tag
+                    break
+            if mda_start_tag:
+                mda_text = []
+                for sibling in mda_start_tag.next_siblings:
+                    if sibling.name and sibling.name in ['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span']:
+                        break
+                    if hasattr(sibling, 'get_text'):
+                        mda_text.append(sibling.get_text(" ", strip=True))
+                    elif isinstance(sibling, str):
+                        mda_text.append(sibling.strip())
+                mda_section = mda_start_tag.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
+                if len(mda_section) > 100:
+                    print(f"[extract_mda_section] Extracted MDA section from HTML (first 500 chars): {mda_section[:500]}")
+                    return mda_section.strip()
+        except Exception as e:
+            print(f"[extract_mda_section] HTML parsing failed: {e}")
+        # Regex fallback
+        mda_patterns = [
+            r"management[’'`]s discussion and analysis[\s\S]{0,100}?of financial condition and results of operations",
+            r"management[’'`]s discussion and analysis",
+            r"item\s+2[.:-]?\s*management[’'`]s discussion and analysis",
+            r"item\s+7[.:-]?\s*management[’'`]s discussion and analysis",
+        ]
+        end_patterns = [
+            r"item\s+3[.:-]?", r"item\s+4[.:-]?", r"quantitative and qualitative disclosures", r"controls and procedures"
+        ]
+        content_lower = content.lower()
+        mda_start = None
+        for pat in mda_patterns:
+            match = re.search(pat, content_lower)
+            if match:
+                mda_start = match.start()
+                break
+        if mda_start is not None:
+            mda_text = content[mda_start:]
+            mda_end = len(mda_text)
+            for pat in end_patterns:
+                match = re.search(pat, mda_text.lower())
+                if match:
+                    mda_end = match.start()
+                    break
+            mda_section = mda_text[:mda_end].strip()
+            print(f"[extract_mda_section] Extracted MDA section from text (first 500 chars): {mda_section[:500]}")
+            return mda_section
+        # Fallback: search for 'Item 7' or 'Item 2' as standalone headers and extract a large block after
+        fallback_patterns = [r'item\s*7[.:-]?\s*', r'item\s*2[.:-]?\s*']
+        for pat in fallback_patterns:
+            match = re.search(pat, content_lower)
+            if match:
+                start = match.start()
+                mda_section = content[start:start+10000]
+                print(f"[extract_mda_section] Fallback block after '{pat}' (first 500 chars): {mda_section[:500]}")
+                return mda_section.strip()
+        # FINAL fallback: scan for the longest section containing both 'management' and 'discussion'
+        candidates = re.findall(r'([\s\S]{0,10000})', content)
+        best = ''
+        for c in candidates:
+            if 'management' in c.lower() and 'discussion' in c.lower() and len(c) > len(best):
+                best = c
+        if best:
+            print(f"[extract_mda_section] FINAL fallback: longest section with 'management' and 'discussion' (first 500 chars): {best[:500]}")
+            return best[:10000].strip()
+        print("[extract_mda_section] MDA section not found in HTML or text.")
+        return "[MDA section not found in filing.]"
 
 class TranslationAgent:
     _translation_cache = {}
