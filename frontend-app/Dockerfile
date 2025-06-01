@@ -9,22 +9,17 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libxml2-dev \
     libxslt1-dev \
-    git \
     && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --upgrade pip setuptools
 
 # Copy requirements and install
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install git+https://github.com/Arelle/Arelle.git#egg=arelle-release
+# Install additional Python dependencies
+RUN pip install inflect
 
 # Copy the rest of the code
 COPY . .
-
-# Copy Google credentials JSON for TTS
-COPY gen-lang-client-0081066415-848a196a3e68.json ./
 
 # Expose port for Cloud Run
 ENV PORT=8080
@@ -33,7 +28,7 @@ ENV PORT=8080
 RUN ls -l /app
 RUN ls -l /app/multi_tool_agent
 RUN cat /app/multi_tool_agent/__init__.py
-
+RUN python -c "import multi_tool_agent.agent"
 
 # Run the FastAPI app with uvicorn
 CMD ["uvicorn", "multi_tool_agent.main:app", "--host", "0.0.0.0", "--port", "8080"] 

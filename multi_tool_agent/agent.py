@@ -1,3 +1,10 @@
+import logging
+import pandas as pd
+from bs4 import BeautifulSoup
+
+# Set up logging at the top of the file
+logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
+
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -22,6 +29,9 @@ import tiktoken
 import numpy as np
 
 SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
+if not SEC_USER_AGENT_EMAIL or SEC_USER_AGENT_EMAIL == "your-email@domain.com":
+    raise RuntimeError("SEC_USER_AGENT_EMAIL environment variable must be set to your real email address for SEC access.")
+
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
@@ -75,16 +85,23 @@ def cleanup_old_files():
     except Exception as e:
         print(f"Error in cleanup_old_files: {e}")
 
+def sec_get(url, **kwargs):
+    headers = kwargs.pop("headers", {})
+    headers["User-Agent"] = f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})"
+    headers["Accept-Encoding"] = "gzip, deflate"
+    response = requests.get(url, headers=headers, **kwargs)
+    if response.status_code == 403:
+        print(f"[SEC 403 ERROR] Forbidden when accessing {url}\nHeaders: {headers}")
+        raise Exception(f"SEC 403 Forbidden: {url}")
+    time.sleep(1)  # Avoid SEC rate limiting
+    return response
+
 class SECAgent:
     @staticmethod
     def get_cik_from_ticker(ticker_or_name: str):
         url = "https://www.sec.gov/files/company_tickers.json"
-        headers = {
-            "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
-            "Accept-Encoding": "gzip, deflate"
-        }
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = sec_get(url, timeout=10)
             response.raise_for_status()
             companies = response.json()
             
@@ -114,12 +131,8 @@ class SECAgent:
         if not cik:
             return None, f"CIK not found for {ticker_or_name}"
         url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-        headers = {
-            "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
-            "Accept-Encoding": "gzip, deflate"
-        }
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = sec_get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
             forms = data.get("filings", {}).get("recent", {})
@@ -164,7 +177,7 @@ class SECAgent:
                         time.sleep(retry_delay)
                         continue
                     return None, f"Could not resolve SEC domain: {str(e)}"
-                response = requests.get(document_url, headers=headers, timeout=30)
+                response = sec_get(document_url, timeout=30)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
                 content = soup.get_text()
@@ -183,9 +196,47 @@ class SECAgent:
                 else:
                     return None, f"Failed to fetch filing after {max_retries} attempts: {str(e)}"
 
+def parse_income_statement_table_deterministic(html):
+    """
+    Try to extract the main income statement table using BeautifulSoup and pandas.read_html.
+    Returns a dict: {period: {metric: value}}
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    # Find all tables
+    tables = soup.find_all('table')
+    for table in tables:
+        try:
+            df_list = pd.read_html(str(table))
+            for df in df_list:
+                # Heuristic: look for a table with 'Revenue' and 'Net Income' in the first column
+                first_col = df.iloc[:, 0].astype(str).str.lower().tolist()
+                if any('revenue' in x for x in first_col) and any('net income' in x or 'profit' in x for x in first_col):
+                    # Try to extract period columns (assume columns 1+ are periods)
+                    period_cols = df.columns[1:]
+                    period_map = {}
+                    for col in period_cols:
+                        period_map[str(col)] = {}
+                        for i, row_name in enumerate(first_col):
+                            val = df.iloc[i, df.columns.get_loc(col)]
+                            if pd.isna(val):
+                                continue
+                            if 'revenue' in row_name:
+                                period_map[str(col)]['Revenue'] = val
+                            if 'net income' in row_name or 'profit' in row_name:
+                                period_map[str(col)]['Net Income'] = val
+                            if 'earnings per share' in row_name or 'eps' in row_name:
+                                period_map[str(col)]['EPS'] = val
+                    logging.debug(f"[DETERMINISTIC TABLE] Extracted: {period_map}")
+                    return period_map
+        except Exception as e:
+            continue
+    logging.debug("[DETERMINISTIC TABLE] No suitable table found.")
+    return {}
+
 def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, num_periods=2):
     """
-    Hybrid extraction: For each period, only use the SEC JSON value that matches the table value (within tolerance) for revenue, net income, and EPS.
+    Hybrid extraction: Use deterministic table extraction (BeautifulSoup + pandas) to extract the income statement table. Only fall back to LLM if deterministic extraction fails.
+    For each period, only use the SEC JSON value that matches the table value (within tolerance) for revenue, net income, and EPS.
     Do not allow multiple values per period. If no match, use the fallback (largest value) and flag it.
     Returns a list of dicts: [{period, revenue, net_income, eps, match_status}]
     """
@@ -232,32 +283,11 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
                             continue
         return candidates
 
-    def parse_income_statement_table_llm(html):
-        prompt = (
-            "Extract the main income statement table from the following SEC filing HTML. "
-            "Return a JSON object mapping period end dates to a dict of metrics (Revenue, Net Income, EPS, Operating Income, etc.) and their values. "
-            "If a value is not present, omit it. Only extract numbers as they appear in the table.\n\n"
-            f"HTML:\n{html[:12000]}\n\nJSON:"
-        )
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a financial analyst and expert table parser."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1024,
-            temperature=0.0,
-        )
-        import json
-        try:
-            table_json = json.loads(response.choices[0].message.content)
-            print("[DEBUG] LLM parsed table:", table_json)
-            return table_json
-        except Exception as e:
-            print("[DEBUG] LLM table parse error:", e)
-            return {}
-
-    table = parse_income_statement_table_llm(filing_html)
+    # Try deterministic table extraction first
+    table = parse_income_statement_table_deterministic(filing_html)
+    if not table:
+        # Fallback to LLM if deterministic extraction fails
+        table = parse_income_statement_table_llm(filing_html)
 
     for i, form in enumerate(forms['form']):
         if form not in ['10-Q', '10-K']:
@@ -284,14 +314,13 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
         revenue_val, revenue_label, revenue_status = match_candidate(revenue_candidates, table_row.get('Revenue'))
         net_income_val, net_income_label, net_income_status = match_candidate(net_income_candidates, table_row.get('Net Income'))
         eps_val, eps_label, eps_status = match_candidate(eps_candidates, table_row.get('EPS'))
-        print(f"[DEBUG] Period {period}: Revenue candidates: {revenue_candidates}")
-        print(f"[DEBUG] Period {period}: Net Income candidates: {net_income_candidates}")
-        print(f"[DEBUG] Period {period}: EPS candidates: {eps_candidates}")
-        print(f"[DEBUG] Period {period}: Table row: {table_row}")
-        print(f"[DEBUG] Period {period}: Selected Revenue: {revenue_val} (label: {revenue_label}, status: {revenue_status})")
-        print(f"[DEBUG] Period {period}: Selected Net Income: {net_income_val} (label: {net_income_label}, status: {net_income_status})")
-        print(f"[DEBUG] Period {period}: Selected EPS: {eps_val} (label: {eps_label}, status: {eps_status})")
-        # Only allow the selected value for each metric to be used for this period
+        logging.debug(f"[DEBUG] Period {period}: Revenue candidates: {revenue_candidates}")
+        logging.debug(f"[DEBUG] Period {period}: Net Income candidates: {net_income_candidates}")
+        logging.debug(f"[DEBUG] Period {period}: EPS candidates: {eps_candidates}")
+        logging.debug(f"[DEBUG] Period {period}: Table row: {table_row}")
+        logging.debug(f"[DEBUG] Period {period}: Selected Revenue: {revenue_val} (label: {revenue_label}, status: {revenue_status})")
+        logging.debug(f"[DEBUG] Period {period}: Selected Net Income: {net_income_val} (label: {net_income_label}, status: {net_income_status})")
+        logging.debug(f"[DEBUG] Period {period}: Selected EPS: {eps_val} (label: {eps_label}, status: {eps_status})")
         results.append({
             'period': period,
             'revenue': revenue_val,
@@ -306,9 +335,9 @@ def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, 
         })
         if len(results) == num_periods:
             break
-    print("[DEBUG] Final selected values per period:")
+    logging.debug("[DEBUG] Final selected values per period:")
     for r in results:
-        print(f"  Period: {r['period']} | Revenue: {r['revenue']} (label: {r['revenue_label']}, status: {r['revenue_status']}) | Net Income: {r['net_income']} (label: {r['net_income_label']}, status: {r['net_income_status']}) | EPS: {r['eps']} (label: {r['eps_label']}, status: {r['eps_status']})")
+        logging.debug(f"  Period: {r['period']} | Revenue: {r['revenue']} (label: {r['revenue_label']}, status: {r['revenue_status']}) | Net Income: {r['net_income']} (label: {r['net_income_label']}, status: {r['net_income_status']}) | EPS: {r['eps']} (label: {r['eps_label']}, status: {r['eps_status']})")
     return results
 
 def build_podcast_prompt_from_financials(financials):
@@ -483,6 +512,42 @@ class SummarizationAgent:
         elapsed = time.time() - start_time
         print(f"[Timing] Summarization (all chunks + final) took {elapsed:.2f} seconds")
         return summary
+
+    @staticmethod
+    def extract_mda_section(content: str) -> str:
+        """
+        Extract the Management's Discussion and Analysis (MDA) section from the filing text.
+        Looks for common MDA section headers and extracts until the next major section.
+        """
+        import re
+        # Try to find the MDA section using common headers
+        mda_patterns = [
+            r"management[’'`]s discussion and analysis[\s\S]{0,100}?of financial condition and results of operations",
+            r"management[’'`]s discussion and analysis",
+            r"item\s+2[.:-]?\s*management[’'`]s discussion and analysis",
+            r"item\s+7[.:-]?\s*management[’'`]s discussion and analysis",
+        ]
+        end_patterns = [
+            r"item\s+3[.:-]?", r"item\s+4[.:-]?", r"quantitative and qualitative disclosures", r"controls and procedures"
+        ]
+        content_lower = content.lower()
+        mda_start = None
+        for pat in mda_patterns:
+            match = re.search(pat, content_lower)
+            if match:
+                mda_start = match.start()
+                break
+        if mda_start is None:
+            return "[MDA section not found in filing.]"
+        mda_text = content[mda_start:]
+        # Find the end of the MDA section
+        mda_end = len(mda_text)
+        for pat in end_patterns:
+            match = re.search(pat, mda_text.lower())
+            if match:
+                mda_end = match.start()
+                break
+        return mda_text[:mda_end].strip()
 
 class TranslationAgent:
     _translation_cache = {}
@@ -765,3 +830,63 @@ class TTSAgent:
         elapsed = time.time() - start_time
         print(f"[Timing] TTS synthesis for {language} took {elapsed:.2f} seconds")
         return filename 
+
+def download_and_extract_xbrl_facts(document_url):
+    """
+    Robustly download and extract XBRL facts from a plain XML file (not in a zip).
+    This function handles plain XML files and extracts key financial metrics.
+    """
+    import requests
+    import xml.etree.ElementTree as ET
+    from datetime import datetime
+    import re
+    import os
+
+    SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
+    headers = {
+        "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
+        "Accept-Encoding": "gzip, deflate"
+    }
+
+    # Define the XBRL namespace
+    ns = {'xbrli': 'http://www.xbrl.org/2003/instance',
+          'us-gaap': 'http://fasb.org/us-gaap/2021-01-31'}
+
+    # Download the XML file
+    response = sec_get(document_url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to download XML file: {response.status_code}")
+
+    # Parse the XML content
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as e:
+        raise Exception(f"Failed to parse XML: {e}")
+
+    # Initialize a dictionary to store extracted facts
+    facts = {
+        'Revenues': [],
+        'NetIncomeLoss': [],
+        'EarningsPerShareBasic': []
+    }
+
+    # Helper function to extract period from contextRef
+    def extract_period(context_ref):
+        # Try to extract period from contextRef using regex
+        match = re.search(r'(\d{4})(\d{2})(\d{2})', context_ref)
+        if match:
+            year, month, day = match.groups()
+            return f"{year}-{month}-{day}"
+        return None
+
+    # Iterate over all elements in the XML
+    for elem in root.findall('.//us-gaap:*', ns):
+        tag = elem.tag.split('}')[-1]  # Remove namespace
+        if tag in facts:
+            context_ref = elem.get('contextRef', '')
+            period = extract_period(context_ref)
+            value = elem.text
+            if value is not None:
+                facts[tag].append({'period': period, 'value': value})
+
+    return facts 

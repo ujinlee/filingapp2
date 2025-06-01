@@ -1,10 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from multi_tool_agent.agent import SECAgent, SummarizationAgent, TranslationAgent, TTSAgent, AUDIO_DIR
+from multi_tool_agent.agent import SECAgent, SummarizationAgent, TranslationAgent, TTSAgent, AUDIO_DIR, download_and_extract_xbrl_facts
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+import requests
 
 load_dotenv()
 
@@ -49,41 +50,92 @@ async def list_filings(ticker: str):
 
 @app.post("/api/summarize", response_model=SummarizeResponse)
 async def summarize_filing(request: SummarizeRequest):
+    import traceback
     try:
-        # 1. Fetch the document
-        content, error = SECAgent.fetch_document(request.documentUrl)
-        if error:
-            raise HTTPException(status_code=404, detail=error)
-        if not content or len(content) < 100:
-            raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
-
-        # 2. Summarize with GPT-3.5
+        # 1. Fetch the raw HTML index page for XBRL extraction
         try:
-            summary = SummarizationAgent.summarize(content)
+            resp = requests.get(request.documentUrl)
+            raw_html = resp.text
         except Exception as e:
+            print("[ERROR] Exception fetching filing index page:", traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Failed to fetch filing index page: {str(e)}")
+
+        # 2. Extract official numbers from Arelle/XBRL using the raw HTML index page
+        try:
+            xbrl_facts = download_and_extract_xbrl_facts(request.documentUrl)
+            def get_latest_value(tag):
+                if tag in xbrl_facts and xbrl_facts[tag]:
+                    sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
+                    return sorted_facts[0]['value']
+                return None
+            revenue = get_latest_value('Revenues')
+            net_income = get_latest_value('NetIncomeLoss')
+            eps = get_latest_value('EarningsPerShareBasic')
+            print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
+            print(f"[DEBUG] All XBRL facts: {xbrl_facts}")
+        except Exception as e:
+            print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
+
+        # 3. Separately fetch the cleaned text for MDA extraction and summarization
+        try:
+            content, error = SECAgent.fetch_document(request.documentUrl)
+            if error:
+                raise HTTPException(status_code=404, detail=error)
+            if not content or len(content) < 100:
+                raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
+        except Exception as e:
+            print("[ERROR] Exception fetching/cleaning filing text:", traceback.format_exc())
+            raise
+
+        # 4. Extract MDA section
+        try:
+            mda_section = SummarizationAgent.extract_mda_section(content)
+        except Exception as e:
+            print("[ERROR] Exception extracting MDA section:", traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"MDA extraction failed: {str(e)}")
+
+        # 5. Construct strict prompt for LLM
+        llm_prompt = f"""
+Here are the official financial numbers for the most recent period:
+- Revenue: ${revenue}
+- Net Income: ${net_income}
+- EPS: ${eps}
+
+Below is the Management's Discussion and Analysis section for context and drivers:
+{mda_section}
+
+Using only the numbers provided above, and the context from the MDA, generate a summary and podcast script. Do not invent or estimate any numbers. If you mention a number, it must be one of the official numbers above. Use the MDA only for narrative, drivers, and strategy.
+"""
+
+        # 6. Summarize with GPT-3.5
+        try:
+            summary = SummarizationAgent.summarize(llm_prompt)
+        except Exception as e:
+            print("[ERROR] Exception in LLM summarization:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
 
-        # 3. Translate
+        # 7. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
-            # If translation failed and fallback to English, force TTS to use en-US
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
                 print("[main] Translation failed or fell back to English, using English TTS.")
                 tts_language = 'en-US'
         except Exception as e:
+            print("[ERROR] Exception in translation:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
 
-        # 4. Generate audio
+        # 8. Generate audio
         try:
             audio_filename = TTSAgent.synthesize(transcript, tts_language)
-            # Verify the audio file exists
             audio_path = os.path.join(AUDIO_DIR, audio_filename)
             if not os.path.exists(audio_path):
                 raise HTTPException(status_code=500, detail=f"Audio file not found at {audio_path}")
             audio_url = f"/audio/{audio_filename}"
             print(f"Audio URL: {audio_url}")
         except Exception as e:
+            print("[ERROR] Exception in TTS synthesis:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Text-to-Speech failed: {str(e)}")
 
         return SummarizeResponse(
@@ -92,8 +144,9 @@ async def summarize_filing(request: SummarizeRequest):
             summary=summary
         )
     except HTTPException as e:
+        print("[ERROR] HTTPException in summarize_filing:", traceback.format_exc())
         raise e
     except Exception as e:
         import traceback
-        print("Error in /api/summarize:", traceback.format_exc())
+        print("[ERROR] Unhandled exception in /api/summarize:", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}") 
