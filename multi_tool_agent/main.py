@@ -80,11 +80,11 @@ async def summarize_filing(request: SummarizeRequest):
 
         # 3. Separately fetch the cleaned text for MDA extraction and summarization
         try:
-            content, error = SECAgent.fetch_document(request.documentUrl)
-            if error:
-                raise HTTPException(status_code=404, detail=error)
-            if not content or len(content) < 100:
-                raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
+        content, error = SECAgent.fetch_document(request.documentUrl)
+        if error:
+            raise HTTPException(status_code=404, detail=error)
+        if not content or len(content) < 100:
+            raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
         except Exception as e:
             print("[ERROR] Exception fetching/cleaning filing text:", traceback.format_exc())
             raise
@@ -116,7 +116,7 @@ async def summarize_filing(request: SummarizeRequest):
             "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
-            "Do NOT mention the MDA section or Management's Discussion and Analysis by name. Just incorporate its insights naturally. "
+            "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
             f"Official numbers for the period:\n"
             f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
@@ -132,16 +132,14 @@ async def summarize_filing(request: SummarizeRequest):
         # 8. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
-            # After translation, enforce strict alternation of speaker tags, always starting with ALEX
+            # After translation, enforce strict alternation of speaker tags, always starting with ALEX, by stripping all tags and reassigning
             lines = [line for line in transcript.split('\n') if line.strip()]
             normalized_lines = []
-            speaker = 'ALEX'
-            for line in lines:
-                if re.match(r'^(ALEX:|JAMIE:)', line, re.IGNORECASE):
-                    normalized_lines.append(f"{speaker}: {re.sub(r'^(ALEX:|JAMIE:)', '', line, flags=re.IGNORECASE).strip()}")
-                    speaker = 'JAMIE' if speaker == 'ALEX' else 'ALEX'
-                else:
-                    normalized_lines.append(line)
+            speakers = ['ALEX', 'JAMIE']
+            for i, line in enumerate(lines):
+                # Remove any existing speaker tag
+                content = re.sub(r'^(ALEX:|JAMIE:)', '', line, flags=re.IGNORECASE).strip()
+                normalized_lines.append(f"{speakers[i % 2]}: {content}")
             transcript = '\n'.join(normalized_lines)
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':

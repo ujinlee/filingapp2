@@ -202,7 +202,7 @@ class SummarizationAgent:
     def summarize(content: str, allowed_numbers=None) -> str:
         start_time = time.time()
         # Directly send the prompt (already constructed in main.py) to the LLM
-        response = openai_client.chat.completions.create(
+            response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a financial analyst."},
@@ -501,56 +501,75 @@ class TTSAgent:
     _tts_cache = {}
     
     @staticmethod
-    def _naturalize_text(text):
+    def _naturalize_text(text, language='en-US'):
         import re
+        import locale
+        try:
+            from babel.numbers import format_decimal
+        except ImportError:
+            format_decimal = None
         p = inflect.engine()
-        # Convert years like 2025 to 'twenty twenty-five'
-        def year_to_words(match):
-            year = int(match.group())
-            if 2000 <= year <= 2099:
-                first = 'twenty'
-                second = str(year % 100)
-                if second == '0':
-                    return first + ' hundred'
-                elif len(second) == 1:
-                    second = 'oh ' + second
-                return f"{first} {second}"
-            return str(year)
-        text = re.sub(r'20[0-9]{2}', year_to_words, text)
-        # Replace 10-Q and 10-K with 'ten Q' and 'ten K'
-        text = re.sub(r'10-([QK])', r'ten \1', text, flags=re.IGNORECASE)
-        # Convert decimals to words (e.g., 19.8 -> nineteen point eight)
-        def decimal_to_words(match):
-            num = match.group(0)
-            left, right = num.split('.')
-            return f"{p.number_to_words(int(left))} point {p.number_to_words(int(right))}"
-        text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
-        # Convert currency and large numbers to words (e.g., $44 billion -> forty-four billion dollars)
-        def currency_to_words(match):
-            num_str = match.group(1).replace(',', '')
-            num_str = re.sub(r'[^\d.-]+$', '', num_str)
+        lang_key = language.split('-')[0]
+        # Helper to localize numbers
+        def localize_number(num_str):
             try:
-                num = float(num_str)
+                num = float(num_str.replace(',', ''))
             except Exception:
-                num = 0
-            unit = match.group(2)
-            if unit:
-                unit = unit.lower()
-                if unit.startswith('b'):
-                    return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} billion dollars"
-                elif unit.startswith('m'):
-                    return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} million dollars"
-            return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} dollars"
-        text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
-        # Convert all numbers (not just 4+ digits) to words, except years and decimals
-        def number_to_words(match):
-            num = int(match.group(0))
-            # Avoid converting years again
-            if 2000 <= num <= 2099:
-                return str(num)
-            return p.number_to_words(num, andword='', zero='zero', group=1)
-        # Only match numbers that are not part of a larger word or decimal
-        text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', number_to_words, text)
+                return num_str
+            if lang_key == 'en':
+                return f"{num:,}"
+            if format_decimal:
+                try:
+                    return format_decimal(num, locale=language.replace('-', '_'))
+                except Exception:
+                    return str(num)
+            return str(num)
+        # Localize numbers in the text for non-English languages
+        if lang_key != 'en':
+            # Replace numbers with localized format
+            text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
+            text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', lambda m: localize_number(m.group(1)), text)
+        # Convert years like 2025 to 'twenty twenty-five' (English only)
+        if lang_key == 'en':
+            def year_to_words(match):
+                year = int(match.group())
+                if 2000 <= year <= 2099:
+                    first = 'twenty'
+                    second = str(year % 100)
+                    if second == '0':
+                        return first + ' hundred'
+                    elif len(second) == 1:
+                        second = 'oh ' + second
+                    return f"{first} {second}"
+                return str(year)
+            text = re.sub(r'20[0-9]{2}', year_to_words, text)
+        # Replace 10-Q and 10-K with 'ten Q' and 'ten K' (all languages)
+        text = re.sub(r'10-([QK])', r'ten \1', text, flags=re.IGNORECASE)
+        # Convert decimals to words (English only)
+        if lang_key == 'en':
+            def decimal_to_words(match):
+                num = match.group(0)
+                left, right = num.split('.')
+                return f"{p.number_to_words(int(left))} point {p.number_to_words(int(right))}"
+            text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
+        # Convert currency and large numbers to words (English only)
+        if lang_key == 'en':
+            def currency_to_words(match):
+                num_str = match.group(1).replace(',', '')
+                num_str = re.sub(r'[^\d.-]+$', '', num_str)
+                try:
+                    num = float(num_str)
+                except Exception:
+                    num = 0
+                unit = match.group(2)
+                if unit:
+                    unit = unit.lower()
+                    if unit.startswith('b'):
+                        return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} billion dollars"
+                    elif unit.startswith('m'):
+                        return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} million dollars"
+                return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} dollars"
+            text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
         # Remove markdown and extra formatting from speaker tags
@@ -576,7 +595,7 @@ class TTSAgent:
         start_time = time.time()
         print(f"[TTSAgent] Starting synthesis for language: {language}")
         client = texttospeech.TextToSpeechClient()
-        text = TTSAgent._naturalize_text(text)
+        text = TTSAgent._naturalize_text(text, language)
         if not text or not re.search(r'\w', text):
             print("[TTSAgent] Input text is empty or only punctuation/whitespace. Aborting TTS synthesis.")
             raise Exception("Input text for TTS is empty or invalid.")
