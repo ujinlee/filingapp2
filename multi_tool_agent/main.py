@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 import requests
+import re
 
 load_dotenv()
 
@@ -112,8 +113,9 @@ async def summarize_filing(request: SummarizeRequest):
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation. "
             "Summarize and naturally weave in the most important points and drivers from the MDA section below, rather than copying it verbatim. Focus on what drove the numbers, company strategy, and any forward-looking statements. "
+            "Do NOT mention the MDA section or Management's Discussion and Analysis by name. Just incorporate its insights naturally. "
+            "Do NOT invent or speculate about customer names, products, or other details not explicitly provided in the MDA section or official numbers. Only use information that is present in the provided text. "
             "Use the official numbers and the narrative from the Management's Discussion and Analysis (MDA) section below. "
-            "Do NOT explicitly say 'we are looking at the MDA section'—instead, naturally incorporate the drivers, strategy, and context from the MDA into the conversation. "
             "Make the discussion engaging and insightful, focusing on what drove the numbers, company strategy, and any forward-looking statements.\n\n"
             f"Official numbers for the period:\n"
             f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
@@ -128,6 +130,11 @@ async def summarize_filing(request: SummarizeRequest):
         # 8. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
+            # Normalize speaker tags in the translated script
+            transcript = re.sub(r'^[*\s]*ALEX[*\s]*:', 'ALEX:', transcript, flags=re.MULTILINE | re.IGNORECASE)
+            transcript = re.sub(r'^[*\s]*JAMIE[*\s]*:', 'JAMIE:', transcript, flags=re.MULTILINE | re.IGNORECASE)
+            # Ensure 'Filing Talk' is always in English
+            transcript = re.sub(r'(Filing\s*Talk|Filingtalk|Filing-Talk|Filing\s+Talk)', 'Filing Talk', transcript, flags=re.IGNORECASE)
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
                 print("[main] Translation failed or fell back to English, using English TTS.")

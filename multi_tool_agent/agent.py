@@ -536,6 +536,8 @@ class TTSAgent:
         # Remove markdown and extra formatting from speaker tags
         text = re.sub(r'^[*\s]*ALEX[*\s]*:', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
         text = re.sub(r'^[*\s]*JAMIE[*\s]*:', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
+        # Ensure NVIDIA is read as 'Nvidia', not spelled out
+        text = re.sub(r'N[\- ]?V[\- ]?D[\- ]?I[\- ]?A', 'Nvidia', text, flags=re.IGNORECASE)
         print(f"[TTSAgent] Processed text for TTS: {text}")
         return text
     
