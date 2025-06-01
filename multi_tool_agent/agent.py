@@ -226,6 +226,7 @@ class SummarizationAgent:
         import requests
         from bs4 import BeautifulSoup
         from lxml import etree
+        import re
         try:
             resp = requests.get(filing_summary_url)
             parser = etree.XMLParser(recover=True)
@@ -246,12 +247,49 @@ class SummarizationAgent:
                         anchor = html_file.split('#', 1)[1]
                         section = soup.find(id=anchor) or soup.find(name='a', attrs={'name': anchor})
                         if section:
-                            mda_text = section.get_text(separator=' ', strip=True)
-                            print(f"[extract_mda_from_filing_summary] Extracted MDA section by anchor (first 500 chars): {mda_text[:500]}")
-                            return mda_text
-                    # Otherwise, extract the full HTML text
+                            # Extract all content after the anchor until the next major section header
+                            mda_text = []
+                            for sibling in section.next_siblings:
+                                if hasattr(sibling, 'get_text'):
+                                    text = sibling.get_text(" ", strip=True)
+                                elif isinstance(sibling, str):
+                                    text = sibling.strip()
+                                else:
+                                    continue
+                                # Stop at next major section header
+                                if re.search(r'item\s+7a|item\s+8|quantitative and qualitative disclosures|controls and procedures', text, re.I):
+                                    break
+                                mda_text.append(text)
+                            mda_section = section.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
+                            print(f"[extract_mda_from_filing_summary] Extracted MDA section by anchor (first 500 chars): {mda_section[:500]}")
+                            return mda_section
+                    # Otherwise, search for the MDA header in the HTML and extract content after it
+                    mda_header = None
+                    header_tags = soup.find_all(['b', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'div', 'span'])
+                    for tag in header_tags:
+                        tag_text = tag.get_text(strip=True).lower()
+                        if 'management' in tag_text and 'discussion' in tag_text:
+                            mda_header = tag
+                            break
+                    if mda_header:
+                        mda_text = []
+                        for sibling in mda_header.next_siblings:
+                            if hasattr(sibling, 'get_text'):
+                                text = sibling.get_text(" ", strip=True)
+                            elif isinstance(sibling, str):
+                                text = sibling.strip()
+                            else:
+                                continue
+                            # Stop at next major section header
+                            if re.search(r'item\s+7a|item\s+8|quantitative and qualitative disclosures|controls and procedures', text, re.I):
+                                break
+                            mda_text.append(text)
+                        mda_section = mda_header.get_text(" ", strip=True) + "\n" + " ".join(mda_text)
+                        print(f"[extract_mda_from_filing_summary] Extracted MDA section from HTML (first 500 chars): {mda_section[:500]}")
+                        return mda_section
+                    # Fallback: extract all text if no header found
                     mda_text = soup.get_text(separator=' ', strip=True)
-                    print(f"[extract_mda_from_filing_summary] Extracted MDA from {mda_url} (first 500 chars): {mda_text[:500]}")
+                    print(f"[extract_mda_from_filing_summary] Fallback: Extracted all text from {mda_url} (first 500 chars): {mda_text[:500]}")
                     return mda_text
         except Exception as e:
             print(f"[extract_mda_from_filing_summary] Error: {e}")
@@ -511,6 +549,9 @@ class TTSAgent:
         if not text or not re.search(r'\w', text):
             print("[TTSAgent] Input text is empty or only punctuation/whitespace. Aborting TTS synthesis.")
             raise Exception("Input text for TTS is empty or invalid.")
+        # Fix common LLM mistakes in speaker tags
+        text = re.sub(r'^(Host\s*1:|Host\s*one:)', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
+        text = re.sub(r'^(Host\s*2:|Host\s*two:)', 'SYDNEY:', text, flags=re.MULTILINE | re.IGNORECASE)
         # Split text into speaker segments, but also split long segments by sentence
         parts = []
         current_speaker = None
