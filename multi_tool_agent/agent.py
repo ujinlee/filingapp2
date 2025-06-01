@@ -499,6 +499,12 @@ class TTSAgent:
         text = re.sub(r'20[0-9]{2}', year_to_words, text)
         # Replace 10-Q and 10-K with 'ten Q' and 'ten K'
         text = re.sub(r'10-([QK])', r'ten \1', text, flags=re.IGNORECASE)
+        # Convert decimals to words (e.g., 19.8 -> nineteen point eight)
+        def decimal_to_words(match):
+            num = match.group(0)
+            left, right = num.split('.')
+            return f"{p.number_to_words(int(left))} point {p.number_to_words(int(right))}"
+        text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
         # Convert currency and large numbers to words (e.g., $44 billion -> forty-four billion dollars)
         def currency_to_words(match):
             num_str = match.group(1).replace(',', '')
@@ -516,17 +522,20 @@ class TTSAgent:
                     return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} million dollars"
             return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} dollars"
         text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
-        # Convert all numbers (not just 4+ digits) to words, except years
+        # Convert all numbers (not just 4+ digits) to words, except years and decimals
         def number_to_words(match):
             num = int(match.group(0))
             # Avoid converting years again
             if 2000 <= num <= 2099:
                 return str(num)
             return p.number_to_words(num, andword='', zero='zero', group=1)
-        # Only match numbers that are not part of a larger word
-        text = re.sub(r'(?<!\w)(\d{1,})(?!\w)', number_to_words, text)
+        # Only match numbers that are not part of a larger word or decimal
+        text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', number_to_words, text)
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
+        # Remove markdown and extra formatting from speaker tags
+        text = re.sub(r'^[*\s]*ALEX[*\s]*:', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
+        text = re.sub(r'^[*\s]*JAMIE[*\s]*:', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
         print(f"[TTSAgent] Processed text for TTS: {text}")
         return text
     
