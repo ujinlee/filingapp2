@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from multi_tool_agent.agent import SECAgent, SummarizationAgent, TranslationAgent, TTSAgent, AUDIO_DIR, download_and_extract_xbrl_facts
+from multi_tool_agent.agent import SECAgent, SummarizationAgent, TranslationAgent, TTSAgent, AUDIO_DIR, extract_xbrl_facts_with_arelle
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,7 +62,7 @@ async def summarize_filing(request: SummarizeRequest):
 
         # 2. Extract official numbers from Arelle/XBRL using the raw HTML index page
         try:
-            xbrl_facts = download_and_extract_xbrl_facts(request.documentUrl)
+            xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
             def get_latest_value(tag):
                 if tag in xbrl_facts and xbrl_facts[tag]:
                     sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)

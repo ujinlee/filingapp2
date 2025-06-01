@@ -1,6 +1,7 @@
 import logging
 import pandas as pd
 from bs4 import BeautifulSoup
+from arelle import Cntlr
 
 # Set up logging at the top of the file
 logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
@@ -195,202 +196,6 @@ class SECAgent:
                     retry_delay *= 2  # Exponential backoff
                 else:
                     return None, f"Failed to fetch filing after {max_retries} attempts: {str(e)}"
-
-def parse_income_statement_table_deterministic(html):
-    """
-    Try to extract the main income statement table using BeautifulSoup and pandas.read_html.
-    Returns a dict: {period: {metric: value}}
-    """
-    soup = BeautifulSoup(html, 'lxml')
-    # Find all tables
-    tables = soup.find_all('table')
-    for table in tables:
-        try:
-            df_list = pd.read_html(str(table))
-            for df in df_list:
-                # Heuristic: look for a table with 'Revenue' and 'Net Income' in the first column
-                first_col = df.iloc[:, 0].astype(str).str.lower().tolist()
-                if any('revenue' in x for x in first_col) and any('net income' in x or 'profit' in x for x in first_col):
-                    # Try to extract period columns (assume columns 1+ are periods)
-                    period_cols = df.columns[1:]
-                    period_map = {}
-                    for col in period_cols:
-                        period_map[str(col)] = {}
-                        for i, row_name in enumerate(first_col):
-                            val = df.iloc[i, df.columns.get_loc(col)]
-                            if pd.isna(val):
-                                continue
-                            if 'revenue' in row_name:
-                                period_map[str(col)]['Revenue'] = val
-                            if 'net income' in row_name or 'profit' in row_name:
-                                period_map[str(col)]['Net Income'] = val
-                            if 'earnings per share' in row_name or 'eps' in row_name:
-                                period_map[str(col)]['EPS'] = val
-                    logging.debug(f"[DETERMINISTIC TABLE] Extracted: {period_map}")
-                    return period_map
-        except Exception as e:
-            continue
-    logging.debug("[DETERMINISTIC TABLE] No suitable table found.")
-    return {}
-
-def extract_key_financials_from_sec_json_and_match_table(sec_json, filing_html, num_periods=2):
-    """
-    Hybrid extraction: Use deterministic table extraction (BeautifulSoup + pandas) to extract the income statement table. Only fall back to LLM if deterministic extraction fails.
-    For each period, only use the SEC JSON value that matches the table value (within tolerance) for revenue, net income, and EPS.
-    Do not allow multiple values per period. If no match, use the fallback (largest value) and flag it.
-    Returns a list of dicts: [{period, revenue, net_income, eps, match_status}]
-    """
-    forms = sec_json['filings']['recent']
-    results = []
-    used_periods = set()
-
-    revenue_labels = [
-        'Revenues',
-        'RevenueFromContractWithCustomerExcludingAssessedTax',
-        'SalesRevenueNet',
-        'SalesRevenueGoodsNet',
-        'TotalRevenuesAndOtherIncome',
-    ]
-    net_income_labels = [
-        'NetIncomeLoss',
-        'ProfitLoss',
-        'NetIncomeLossAvailableToCommonStockholdersBasic',
-    ]
-    eps_labels = [
-        'EarningsPerShareBasic',
-        'EarningsPerShareBasicAndDiluted',
-    ]
-    facts = sec_json.get('facts', {}).get('us-gaap', {})
-
-    def get_all_candidate_values(labels, period):
-        candidates = []
-        for label in labels:
-            fact = facts.get(label)
-            if not fact or 'units' not in fact:
-                continue
-            for unit, entries in fact['units'].items():
-                for entry in entries:
-                    entry_date = entry.get('end', '')[:10]
-                    if entry_date == period:
-                        candidates.append({'label': label, 'unit': unit, 'val': entry['val']})
-                    else:
-                        try:
-                            entry_dt = datetime.strptime(entry_date, "%Y-%m-%d")
-                            period_dt = datetime.strptime(period, "%Y-%m-%d")
-                            if abs((entry_dt - period_dt).days) == 1:
-                                candidates.append({'label': label, 'unit': unit, 'val': entry['val']})
-                        except Exception:
-                            continue
-        return candidates
-
-    # Try deterministic table extraction first
-    table = parse_income_statement_table_deterministic(filing_html)
-    if not table:
-        # Fallback to LLM if deterministic extraction fails
-        table = parse_income_statement_table_llm(filing_html)
-
-    for i, form in enumerate(forms['form']):
-        if form not in ['10-Q', '10-K']:
-            continue
-        period = forms['filingDate'][i]
-        if period in used_periods:
-            continue
-        used_periods.add(period)
-        revenue_candidates = get_all_candidate_values(revenue_labels, period)
-        net_income_candidates = get_all_candidate_values(net_income_labels, period)
-        eps_candidates = get_all_candidate_values(eps_labels, period)
-        table_row = table.get(period, {})
-        def match_candidate(candidates, table_val):
-            for c in candidates:
-                try:
-                    if table_val is not None and np.isclose(float(c['val']), float(table_val), rtol=0.01):
-                        return c['val'], c['label'], 'matched'
-                except Exception:
-                    continue
-            if candidates:
-                largest = max(candidates, key=lambda x: abs(float(x['val'])))
-                return largest['val'], largest['label'], 'fallback_largest'
-            return None, None, 'not_found'
-        revenue_val, revenue_label, revenue_status = match_candidate(revenue_candidates, table_row.get('Revenue'))
-        net_income_val, net_income_label, net_income_status = match_candidate(net_income_candidates, table_row.get('Net Income'))
-        eps_val, eps_label, eps_status = match_candidate(eps_candidates, table_row.get('EPS'))
-        logging.debug(f"[DEBUG] Period {period}: Revenue candidates: {revenue_candidates}")
-        logging.debug(f"[DEBUG] Period {period}: Net Income candidates: {net_income_candidates}")
-        logging.debug(f"[DEBUG] Period {period}: EPS candidates: {eps_candidates}")
-        logging.debug(f"[DEBUG] Period {period}: Table row: {table_row}")
-        logging.debug(f"[DEBUG] Period {period}: Selected Revenue: {revenue_val} (label: {revenue_label}, status: {revenue_status})")
-        logging.debug(f"[DEBUG] Period {period}: Selected Net Income: {net_income_val} (label: {net_income_label}, status: {net_income_status})")
-        logging.debug(f"[DEBUG] Period {period}: Selected EPS: {eps_val} (label: {eps_label}, status: {eps_status})")
-        results.append({
-            'period': period,
-            'revenue': revenue_val,
-            'revenue_label': revenue_label,
-            'revenue_status': revenue_status,
-            'net_income': net_income_val,
-            'net_income_label': net_income_label,
-            'net_income_status': net_income_status,
-            'eps': eps_val,
-            'eps_label': eps_label,
-            'eps_status': eps_status
-        })
-        if len(results) == num_periods:
-            break
-    logging.debug("[DEBUG] Final selected values per period:")
-    for r in results:
-        logging.debug(f"  Period: {r['period']} | Revenue: {r['revenue']} (label: {r['revenue_label']}, status: {r['revenue_status']}) | Net Income: {r['net_income']} (label: {r['net_income_label']}, status: {r['net_income_status']}) | EPS: {r['eps']} (label: {r['eps_label']}, status: {r['eps_status']})")
-    return results
-
-def build_podcast_prompt_from_financials(financials):
-    def calc_growth(new, old):
-        try:
-            return (float(new) - float(old)) / float(old) * 100
-        except:
-            return None
-    prompt_lines = ["Here are the key financial numbers for the company, by period:"]
-    for i, f in enumerate(financials):
-        prompt_lines.append(f"- Period: {f['period']}")
-        prompt_lines.append(f"  Revenue: ${f['revenue']} million")
-        prompt_lines.append(f"  Net income: ${f['net_income']} million")
-        prompt_lines.append(f"  Basic earnings per share: ${f['eps']}")
-        if i > 0 and f['revenue'] and financials[i-1]['revenue']:
-            growth = calc_growth(f['revenue'], financials[i-1]['revenue'])
-            if growth is not None:
-                prompt_lines.append(f"  Revenue YoY/QoQ growth: {growth:.1f}% (from ${financials[i-1]['revenue']} million in {financials[i-1]['period']})")
-        if i > 0 and f['net_income'] and financials[i-1]['net_income']:
-            growth = calc_growth(f['net_income'], financials[i-1]['net_income'])
-            if growth is not None:
-                prompt_lines.append(f"  Net income YoY/QoQ growth: {growth:.1f}% (from ${financials[i-1]['net_income']} million in {financials[i-1]['period']})")
-        if i > 0 and f['eps'] and financials[i-1]['eps']:
-            growth = calc_growth(f['eps'], financials[i-1]['eps'])
-            if growth is not None:
-                prompt_lines.append(f"  EPS YoY/QoQ growth: {growth:.1f}% (from ${financials[i-1]['eps']} in {financials[i-1]['period']})")
-    prompt_lines.append("\nYou must only use the numbers provided above, and only in reference to their correct period. Do not use or mention any other numbers. If you need to reference a number, it must be one of the numbers listed above for the correct period. If a number is not provided, do not estimate, invent, or mention it.")
-    prompt_lines.append("Please generate a 3-4 minute podcast script as a conversation between Alex and Jamie, focusing on these numbers and their significance. If you discuss reasons for changes, use only what is explicitly stated in the provided context. Always specify the period when mentioning a number.")
-    return '\n'.join(prompt_lines)
-
-def check_script_numbers_period_aware(script, financials):
-    """
-    For each number in the script, check that it is only used in the context of its correct period.
-    If a number is used in the wrong period, redact it.
-    """
-    import re
-    flagged = False
-    for f in financials:
-        for key in ['revenue', 'net_income', 'eps']:
-            val = f[key]
-            if val is None:
-                continue
-            num_pattern = re.escape(str(val))
-            for m in re.finditer(num_pattern, script):
-                start = max(0, m.start() - 50)
-                end = min(len(script), m.end() + 50)
-                context = script[start:end]
-                if f['period'] not in context:
-                    script = script[:m.start()] + '[REDACTED]' + script[m.end():]
-                    flagged = True
-    if flagged:
-        script += "\n[WARNING: Some numbers were replaced with [REDACTED] because they were not referenced with the correct period!]"
-    return script, flagged
 
 class SummarizationAgent:
     @staticmethod
@@ -889,4 +694,24 @@ def download_and_extract_xbrl_facts(document_url):
             if value is not None:
                 facts[tag].append({'period': period, 'value': value})
 
+    return facts 
+
+def extract_xbrl_facts_with_arelle(xbrl_path_or_url):
+    cntlr = Cntlr.Cntlr()
+    model_xbrl = cntlr.modelManager.load(xbrl_path_or_url)
+    facts = {
+        'Revenues': [],
+        'NetIncomeLoss': [],
+        'EarningsPerShareBasic': []
+    }
+    for fact in model_xbrl.facts:
+        if fact.concept is not None:
+            name = fact.concept.qname.localName
+            if name in facts:
+                period = None
+                if hasattr(fact.context, 'endDatetime') and fact.context.endDatetime:
+                    period = fact.context.endDatetime.strftime('%Y-%m-%d')
+                value = fact.value
+                if value is not None:
+                    facts[name].append({'period': period, 'value': value})
     return facts 
