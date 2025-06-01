@@ -242,17 +242,18 @@ class SummarizationAgent:
                     mda_url = base_url + html_file
                     mda_html = requests.get(mda_url).text
                     soup = BeautifulSoup(mda_html, "html.parser")
-                    # Improved: Find all possible MDA headers, skip TOC, extract narrative
                     header_tags = soup.find_all(lambda tag: tag.name in ["b", "strong", "h1", "h2", "h3", "h4", "p", "a", "div", "span"])
+                    min_index = int(len(header_tags) * 0.1)
                     mda_header = None
-                    for tag in header_tags:
+                    for i, tag in enumerate(header_tags):
+                        if i < min_index:
+                            continue  # Skip TOC region
                         text = tag.get_text(separator=" ", strip=True).lower()
                         if re.search(r"management.?s discussion", text):
                             siblings = list(tag.find_next_siblings())
-                            if len(siblings) >= 2 and all(len(s.get_text(strip=True)) < 100 for s in siblings[:2]):
-                                continue  # Probably TOC, skip
-                            mda_header = tag
-                            break
+                            if any(len(s.get_text(strip=True)) > 200 for s in siblings[:3]):
+                                mda_header = tag
+                                break
                     if not mda_header:
                         print("[extract_mda_from_filing_summary] No MDA heading found.")
                         return None
@@ -287,15 +288,17 @@ class SummarizationAgent:
         try:
             soup = BeautifulSoup(content, 'html.parser')
             header_tags = soup.find_all(lambda tag: tag.name in ["b", "strong", "h1", "h2", "h3", "h4", "p", "a", "div", "span"])
+            min_index = int(len(header_tags) * 0.1)
             mda_header = None
-            for tag in header_tags:
+            for i, tag in enumerate(header_tags):
+                if i < min_index:
+                    continue  # Skip TOC region
                 text = tag.get_text(separator=" ", strip=True).lower()
                 if re.search(r"management.?s discussion", text):
                     siblings = list(tag.find_next_siblings())
-                    if len(siblings) >= 2 and all(len(s.get_text(strip=True)) < 100 for s in siblings[:2]):
-                        continue  # Probably TOC, skip
-                    mda_header = tag
-                    break
+                    if any(len(s.get_text(strip=True)) > 200 for s in siblings[:3]):
+                        mda_header = tag
+                        break
             if mda_header:
                 mda_text = ""
                 for sibling in mda_header.find_next_siblings():
@@ -668,6 +671,16 @@ class TTSAgent:
         print(f"[TTSAgent] Audio file written: {filepath}, size: {os.path.getsize(filepath)} bytes")
         elapsed = time.time() - start_time
         print(f"[Timing] TTS synthesis for {language} took {elapsed:.2f} seconds")
+        # Post-process to enforce alternation if only one speaker is present
+        unique_speakers = set(speaker for speaker, _ in parts)
+        if len(unique_speakers) == 1 and parts:
+            # Alternate speakers for each segment
+            alt_parts = []
+            speakers = ['ALEX', 'JAMIE'] if parts[0][0] == 'ALEX' else ['JAMIE', 'ALEX']
+            for i, (_, segment) in enumerate(parts):
+                alt_parts.append((speakers[i % 2], segment))
+            parts = alt_parts
+        print(f"[TTSAgent] Speaker segments after alternation: {[(speaker, segment[:40]) for speaker, segment in parts]}")
         return filename 
 
 def download_and_extract_xbrl_facts(document_url):
