@@ -89,31 +89,19 @@ async def summarize_filing(request: SummarizeRequest):
             raise
 
         # 4. Extract MDA section
-        try:
-            mda_section = SummarizationAgent.extract_mda_section(content)
-        except Exception as e:
-            print("[ERROR] Exception extracting MDA section:", traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"MDA extraction failed: {str(e)}")
+        mda_section = SummarizationAgent.extract_mda_section(content)
 
-        # 5. Construct strict prompt for LLM
-        llm_prompt = f"""
-Here are the official financial numbers for the most recent period:
-- Revenue: ${revenue}
-- Net Income: ${net_income}
-- EPS: ${eps}
+        # 5. Build the LLM prompt with both numbers and MDA
+        prompt = (
+            f"Here are the official numbers for the period:\n"
+            f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
+            f"Here is the Management's Discussion and Analysis (MDA) section from the filing:\n"
+            f"{mda_section}\n\n"
+            f"Please write a podcast script that uses both the numbers and the narrative from the MDA."
+        )
 
-Below is the Management's Discussion and Analysis section for context and drivers:
-{mda_section}
-
-Using only the numbers provided above, and the context from the MDA, generate a summary and podcast script. Do not invent or estimate any numbers. If you mention a number, it must be one of the official numbers above. Use the MDA only for narrative, drivers, and strategy.
-"""
-
-        # 6. Summarize with GPT-3.5
-        try:
-            summary = SummarizationAgent.summarize(llm_prompt)
-        except Exception as e:
-            print("[ERROR] Exception in LLM summarization:", traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
+        # 6. Summarize
+        summary = SummarizationAgent.summarize(prompt)
 
         # 7. Translate
         try:

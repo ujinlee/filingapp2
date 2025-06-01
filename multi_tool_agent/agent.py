@@ -413,40 +413,46 @@ class TTSAgent:
         start_time = time.time()
         print(f"[TTSAgent] Starting synthesis for language: {language}")
         client = texttospeech.TextToSpeechClient()
-        # Preprocess text for natural speech
         text = TTSAgent._naturalize_text(text)
-        
-        # Split text into speaker segments
+        if not text or not re.search(r'\w', text):
+            print("[TTSAgent] Input text is empty or only punctuation/whitespace. Aborting TTS synthesis.")
+            raise Exception("Input text for TTS is empty or invalid.")
+        # Split text into speaker segments, but also split long segments by sentence
         parts = []
         current_speaker = None
         current_text = []
-        
         for line in text.split('\n'):
             line = line.strip()
+            if not line or not re.search(r'\w', line):
+                continue
             if line.startswith('ALEX:'):
                 if current_speaker and current_text:
-                    parts.append((current_speaker, ' '.join(current_text)))
+                    # Further split by sentence if too long
+                    segment = ' '.join(current_text)
+                    for sent in re.split(r'(?<=[.!?]) +', segment):
+                        if sent.strip():
+                            parts.append((current_speaker, sent.strip()))
                 current_speaker = 'ALEX'
                 current_text = [line[5:].strip()]
             elif line.startswith('JAMIE:'):
                 if current_speaker and current_text:
-                    parts.append((current_speaker, ' '.join(current_text)))
+                    segment = ' '.join(current_text)
+                    for sent in re.split(r'(?<=[.!?]) +', segment):
+                        if sent.strip():
+                            parts.append((current_speaker, sent.strip()))
                 current_speaker = 'JAMIE'
                 current_text = [line[6:].strip()]
             else:
                 current_text.append(line)
-                
         if current_speaker and current_text:
-            parts.append((current_speaker, ' '.join(current_text)))
-        
+            segment = ' '.join(current_text)
+            for sent in re.split(r'(?<=[.!?]) +', segment):
+                if sent.strip():
+                    parts.append((current_speaker, sent.strip()))
         def add_sentence_pauses(text):
-            # Add a 400ms pause after each sentence-ending punctuation
             return re.sub(r'([.!?])', r'\1<break time="400ms"/>', text)
-        
         audio_segments = []
         lang_key = language.split('-')[0]
-        
-        # Map language to (ALEX, JAMIE) WaveNet voices
         voice_map = {
             'en': (('en-US', 'en-US-Wavenet-D', texttospeech.SsmlVoiceGender.MALE),
                    ('en-US', 'en-US-Wavenet-F', texttospeech.SsmlVoiceGender.FEMALE)),
@@ -463,13 +469,12 @@ class TTSAgent:
             'de': (('de-DE', 'de-DE-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
                    ('de-DE', 'de-DE-Wavenet-A', texttospeech.SsmlVoiceGender.FEMALE)),
         }
-        
         def synthesize_segment(args):
             speaker, segment = args
-            if not segment.strip():
-                print(f"[TTSAgent] Empty segment for speaker {speaker}, skipping")
+            if not segment.strip() or not re.search(r'\w', segment):
+                print(f"[TTSAgent] Skipping empty or non-informative segment for speaker {speaker}.")
                 return None
-            # Check cache first
+            print(f"[TTSAgent] Sending segment to TTS: [{speaker}] {segment}")
             cache_key = f"{hash(segment)}_{language}_{speaker}"
             if cache_key in TTSAgent._tts_cache:
                 print(f"[TTSAgent] Using cached audio for speaker {speaker}")
@@ -498,7 +503,6 @@ class TTSAgent:
                     )
                     pitch = "0st"
                     break_time = "800ms"
-                # Add sentence-level pauses for naturalness
                 segment_with_pauses = add_sentence_pauses(segment)
                 ssml = f'<speak><prosody rate="medium" pitch="{pitch}">{segment_with_pauses}<break time="{break_time}"/></prosody></speak>'
                 synthesis_input = texttospeech.SynthesisInput(ssml=ssml)
@@ -513,14 +517,12 @@ class TTSAgent:
                     print(f"[TTSAgent] Warning: No audio content returned for segment: {segment[:100]}")
                     return None
                 print(f"[TTSAgent] Successfully synthesized segment for speaker {speaker}")
-                # Cache the result
                 TTSAgent._tts_cache[cache_key] = tts_response.audio_content
                 return tts_response.audio_content
             except Exception as e:
                 print(f"[TTSAgent] Error synthesizing segment for speaker {speaker}: {str(e)}")
                 print(f"[TTSAgent] Segment content: {segment[:100]}")
                 return None
-        # Use ThreadPoolExecutor for parallel TTS synthesis
         num_workers = max(1, min(len(parts), 4))
         print(f"[TTSAgent] Using {num_workers} workers for parallel synthesis")
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
