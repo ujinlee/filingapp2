@@ -400,6 +400,46 @@ class TranslationAgent:
     @staticmethod
     def translate(english_script: str, target_language: str) -> str:
         start_time = time.time()
+        # Pre-format large numbers for local language units before translation
+        def localize_large_numbers(text, lang):
+            import re
+            def billion_to_local(match):
+                num = float(match.group(1).replace(',', ''))
+                # Only match exact billions
+                if num % 1 != 0:
+                    return match.group(0)
+                if lang.startswith('ko'):
+                    # 1 billion = 10억, 4 billion = 40억
+                    eok = int(num * 10)
+                    return f"{eok}억 달러"
+                elif lang.startswith('ja'):
+                    oku = int(num * 10)
+                    return f"{oku}億ドル"
+                elif lang.startswith('zh'):
+                    yi = int(num * 10)
+                    return f"{yi}亿美元"
+                else:
+                    return f"{int(num)} billion dollars"
+            def million_to_local(match):
+                num = float(match.group(1).replace(',', ''))
+                if num % 1 != 0:
+                    return match.group(0)
+                if lang.startswith('ko'):
+                    return f"{int(num)}백만 달러"
+                elif lang.startswith('ja'):
+                    return f"{int(num)}百万ドル"
+                elif lang.startswith('zh'):
+                    return f"{int(num)}百万美元"
+                else:
+                    return f"{int(num)} million dollars"
+            # Replace $X billion
+            text = re.sub(r'\$([\d,]+)\s*billion', billion_to_local, text, flags=re.IGNORECASE)
+            # Replace $X million
+            text = re.sub(r'\$([\d,]+)\s*million', million_to_local, text, flags=re.IGNORECASE)
+            return text
+        # Only localize for non-English
+        if not target_language.startswith('en'):
+            english_script = localize_large_numbers(english_script, target_language)
         if target_language == "en-US":
             return english_script
         cache_key = f"{hash(english_script)}_{target_language}"
@@ -438,12 +478,35 @@ class TranslationAgent:
 
         def translate_block(args):
             speaker, block = args
-            # Use a special prompt for Korean to enforce polite, formal, podcast-appropriate tone
+            # Use a special prompt for Korean, Japanese, Chinese to enforce correct number units and tone
             if target_language.startswith("ko"):
                 prompt = (
                     f"Translate the entire following podcast script to Korean. "
                     f"Use a polite, formal, and professional tone suitable for a business podcast, not casual speech. "
+                    f"When you see numbers like '40억 달러', do not change the value or unit. Do not convert currencies. "
                     f"Make the conversation sound natural and idiomatic in Korean, as if two professional podcast hosts are discussing the topic. "
+                    f"Adapt expressions and flow for naturalness, not just literal translation. "
+                    f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
+                    f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
+                    f"{block}"
+                )
+            elif target_language.startswith("ja"):
+                prompt = (
+                    f"Translate the entire following podcast script to Japanese. "
+                    f"Use a polite, formal, and professional tone suitable for a business podcast, not casual speech. "
+                    f"When you see numbers like '40億ドル', do not change the value or unit. Do not convert currencies. "
+                    f"Make the conversation sound natural and idiomatic in Japanese, as if two professional podcast hosts are discussing the topic. "
+                    f"Adapt expressions and flow for naturalness, not just literal translation. "
+                    f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
+                    f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
+                    f"{block}"
+                )
+            elif target_language.startswith("zh"):
+                prompt = (
+                    f"Translate the entire following podcast script to Chinese. "
+                    f"Use a polite, formal, and professional tone suitable for a business podcast, not casual speech. "
+                    f"When you see numbers like '40亿美元', do not change the value or unit. Do not convert currencies. "
+                    f"Make the conversation sound natural and idiomatic in Chinese, as if two professional podcast hosts are discussing the topic. "
                     f"Adapt expressions and flow for naturalness, not just literal translation. "
                     f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
                     f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
