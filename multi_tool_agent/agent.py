@@ -202,7 +202,7 @@ class SummarizationAgent:
     def summarize(content: str, allowed_numbers=None) -> str:
         start_time = time.time()
         # Directly send the prompt (already constructed in main.py) to the LLM
-            response = openai_client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a financial analyst."},
