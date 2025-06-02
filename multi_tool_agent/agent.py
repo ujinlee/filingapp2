@@ -403,39 +403,35 @@ class TranslationAgent:
         # Pre-format large numbers for local language units before translation
         def localize_large_numbers(text, lang):
             import re
-            def billion_to_local(match):
-                num = float(match.group(1).replace(',', ''))
-                # Only match exact billions
-                if num % 1 != 0:
+            def dollar_to_eok(match):
+                num_str = match.group(1).replace(',', '')
+                try:
+                    num = float(num_str)
+                except Exception:
                     return match.group(0)
-                if lang.startswith('ko'):
-                    # 1 billion = 10억, 4 billion = 40억
-                    eok = int(num * 10)
-                    return f"{eok}억 달러"
-                elif lang.startswith('ja'):
-                    oku = int(num * 10)
-                    return f"{oku}億ドル"
-                elif lang.startswith('zh'):
-                    yi = int(num * 10)
-                    return f"{yi}亿美元"
-                else:
-                    return f"{int(num)} billion dollars"
-            def million_to_local(match):
-                num = float(match.group(1).replace(',', ''))
-                if num % 1 != 0:
-                    return match.group(0)
-                if lang.startswith('ko'):
-                    return f"{int(num)}백만 달러"
-                elif lang.startswith('ja'):
-                    return f"{int(num)}百万ドル"
-                elif lang.startswith('zh'):
-                    return f"{int(num)}百万美元"
-                else:
-                    return f"{int(num)} million dollars"
-            # Replace $X billion
-            text = re.sub(r'\$([\d,]+)\s*billion', billion_to_local, text, flags=re.IGNORECASE)
-            # Replace $X million
-            text = re.sub(r'\$([\d,]+)\s*million', million_to_local, text, flags=re.IGNORECASE)
+                # Only convert if number is at least 100 million
+                if num >= 100_000_000:
+                    eok = round(num / 100_000_000, 1)
+                    if lang.startswith('ko'):
+                        return f"{eok}억 달러"
+                    elif lang.startswith('ja'):
+                        return f"{eok}億ドル"
+                    elif lang.startswith('zh'):
+                        return f"{eok}亿美元"
+                # For millions
+                elif num >= 1_000_000:
+                    million = round(num / 1_000_000, 1)
+                    if lang.startswith('ko'):
+                        return f"{million}백만 달러"
+                    elif lang.startswith('ja'):
+                        return f"{million}百万ドル"
+                    elif lang.startswith('zh'):
+                        return f"{million}百万美元"
+                return match.group(0)
+            # Replace $X, $X billion, $X million
+            text = re.sub(r'\$([\d,]+)', dollar_to_eok, text)
+            text = re.sub(r'\$([\d,]+)\s*billion', dollar_to_eok, text, flags=re.IGNORECASE)
+            text = re.sub(r'\$([\d,]+)\s*million', dollar_to_eok, text, flags=re.IGNORECASE)
             return text
         # Only localize for non-English
         if not target_language.startswith('en'):
