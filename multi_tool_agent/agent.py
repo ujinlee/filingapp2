@@ -438,14 +438,26 @@ class TranslationAgent:
 
         def translate_block(args):
             speaker, block = args
-            prompt = (
-                f"Translate the entire following podcast script to {target_language}. "
-                f"Make the conversation sound natural and idiomatic in {target_language}, as if two native speakers are discussing the topic. "
-                f"Adapt expressions and flow for naturalness, not just literal translation. "
-                f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
-                f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
-                f"{block}"
-            )
+            # Use a special prompt for Korean to enforce polite, formal, podcast-appropriate tone
+            if target_language.startswith("ko"):
+                prompt = (
+                    f"Translate the entire following podcast script to Korean. "
+                    f"Use a polite, formal, and professional tone suitable for a business podcast, not casual speech. "
+                    f"Make the conversation sound natural and idiomatic in Korean, as if two professional podcast hosts are discussing the topic. "
+                    f"Adapt expressions and flow for naturalness, not just literal translation. "
+                    f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
+                    f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
+                    f"{block}"
+                )
+            else:
+                prompt = (
+                    f"Translate the entire following podcast script to {target_language}. "
+                    f"Make the conversation sound natural and idiomatic in {target_language}, as if two native speakers are discussing the topic. "
+                    f"Adapt expressions and flow for naturalness, not just literal translation. "
+                    f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
+                    f"Do not modify or remove the speaker tags. Return the complete translated script with all lines preserved.\n\n"
+                    f"{block}"
+                )
             print(f"[TranslationAgent] Starting translation for {target_language}.")
             response = openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -668,6 +680,7 @@ class TTSAgent:
                         lang_code, voice_name, gender = voice_map[lang_key][1]
                         pitch = "-1st"
                         break_time = "1000ms"
+                    print(f"[TTSAgent] Using voice: {voice_name} (gender: {gender}) for speaker {speaker} in language {language}")
                     voice = texttospeech.VoiceSelectionParams(
                         language_code=lang_code,
                         name=voice_name,
