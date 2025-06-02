@@ -46,7 +46,7 @@ class SummarizeResponse(BaseModel):
 async def list_filings(ticker: str):
     filings, error = SECAgent.list_filings(ticker)
     if error:
-        raise HTTPException(status_code=404, detail=error)
+        raise HTTPException(status_code=404, detail="No filings found for that ticker. Please try another.")
     return filings
 
 @app.post("/api/summarize", response_model=SummarizeResponse)
@@ -58,7 +58,7 @@ async def summarize_filing(request: SummarizeRequest):
             resp = requests.get(request.documentUrl)
             raw_html = resp.text
         except Exception as e:
-            print("[ERROR] Exception fetching filing index page:", traceback.format_exc())
+            print("[ERROR] Exception fetching filing index page")
             raise HTTPException(status_code=500, detail=f"Failed to fetch filing index page: {str(e)}")
 
         # 2. Extract official numbers from Arelle/XBRL using the raw HTML index page
@@ -80,7 +80,7 @@ async def summarize_filing(request: SummarizeRequest):
             eps = get_latest_value('EarningsPerShareBasic')
             print(f"[INFO] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
         except Exception as e:
-            print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
+            print("[ERROR] Exception in XBRL extraction")
             raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
 
         # 3. Separately fetch the cleaned text for MDA extraction and summarization
@@ -91,7 +91,7 @@ async def summarize_filing(request: SummarizeRequest):
             if not content or len(content) < 100:
                 raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
         except Exception as e:
-            print("[ERROR] Exception fetching/cleaning filing text:", traceback.format_exc())
+            print("[ERROR] Exception fetching/cleaning filing text")
             raise
 
         # 4. Detect FilingSummary.xml and base URL
@@ -128,7 +128,8 @@ async def summarize_filing(request: SummarizeRequest):
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
             "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
-            "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
+            "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements. "
+            "Always start the podcast with a welcome message like 'Welcome to Filing Talk, where we break down the latest financial filings into easy-to-understand insights.'\n\n"
             "Official numbers for the period:\n"
             + "\n".join(official_numbers) +
             "\n\nBegin the podcast script now."
@@ -138,7 +139,7 @@ async def summarize_filing(request: SummarizeRequest):
         summary = SummarizationAgent.summarize(prompt)
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
-        print("[INFO] Final podcast summary:")
+        print("[INFO] Final podcast summary generated.")
         print(summary)
 
         # 8. Translate
@@ -160,7 +161,7 @@ async def summarize_filing(request: SummarizeRequest):
                 print("[main] Translation failed or fell back to English, using English TTS.")
                 tts_language = 'en-US'
         except Exception as e:
-            print("[ERROR] Exception in translation:", traceback.format_exc())
+            print("[ERROR] Exception in translation")
             raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
 
         # 9. Generate audio
@@ -172,7 +173,7 @@ async def summarize_filing(request: SummarizeRequest):
             audio_url = f"/audio/{audio_filename}"
             print(f"Audio URL: {audio_url}")
         except Exception as e:
-            print("[ERROR] Exception in TTS synthesis:", traceback.format_exc())
+            print("[ERROR] Exception in TTS synthesis")
             raise HTTPException(status_code=500, detail=f"Text-to-Speech failed: {str(e)}")
 
         return SummarizeResponse(
@@ -181,9 +182,9 @@ async def summarize_filing(request: SummarizeRequest):
             summary=summary
         )
     except HTTPException as e:
-        print("[ERROR] HTTPException in summarize_filing:", traceback.format_exc())
+        print("[ERROR] HTTPException in summarize_filing")
         raise e
     except Exception as e:
         import traceback
-        print("[ERROR] Unhandled exception in /api/summarize:", traceback.format_exc())
+        print("[ERROR] Unhandled exception in /api/summarize")
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}") 
