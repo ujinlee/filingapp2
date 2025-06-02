@@ -132,13 +132,13 @@ async def summarize_filing(request: SummarizeRequest):
         # 8. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
-            # After translation, enforce strict alternation of speaker tags, always starting with ALEX, by stripping all tags and reassigning
+            # After translation, enforce strict alternation of speaker tags, always starting with ALEX, by stripping all tags (including translated ones) and reassigning
             lines = [line for line in transcript.split('\n') if line.strip()]
             normalized_lines = []
             speakers = ['ALEX', 'JAMIE']
             for i, line in enumerate(lines):
-                # Remove any existing speaker tag
-                content = re.sub(r'^(ALEX:|JAMIE:)', '', line, flags=re.IGNORECASE).strip()
+                # Remove any existing speaker tag (including translated ones)
+                content = re.sub(r'^(ALEX:|JAMIE:|알렉스:|제이미:)', '', line, flags=re.IGNORECASE).strip()
                 normalized_lines.append(f"{speakers[i % 2]}: {content}")
             transcript = '\n'.join(normalized_lines)
             tts_language = request.language
