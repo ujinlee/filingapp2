@@ -78,8 +78,7 @@ async def summarize_filing(request: SummarizeRequest):
                     break
             net_income = get_latest_value('NetIncomeLoss')
             eps = get_latest_value('EarningsPerShareBasic')
-            print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
-            print(f"[DEBUG] All XBRL facts: {xbrl_facts}")
+            print(f"[INFO] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
         except Exception as e:
             print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
@@ -110,7 +109,6 @@ async def summarize_filing(request: SummarizeRequest):
         mda_section = SummarizationAgent.extract_mda_section(content, filing_summary_url, base_url)
         if mda_section is None:
             mda_section = "[MDA section not found in filing.]"
-        print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
 
         # 6. Build the LLM prompt with both numbers and MDA
         official_numbers = []
@@ -138,9 +136,10 @@ async def summarize_filing(request: SummarizeRequest):
 
         # 7. Summarize
         summary = SummarizationAgent.summarize(prompt)
-
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
+        print("[INFO] Final podcast summary:")
+        print(summary)
 
         # 8. Translate
         try:
@@ -154,6 +153,8 @@ async def summarize_filing(request: SummarizeRequest):
                 content = re.sub(r'^(ALEX:|JAMIE:|알렉스:|제이미:)', '', line, flags=re.IGNORECASE).strip()
                 normalized_lines.append(f"{speakers[i % 2]}: {content}")
             transcript = '\n'.join(normalized_lines)
+            print("[INFO] Final podcast transcript:")
+            print(transcript)
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
                 print("[main] Translation failed or fell back to English, using English TTS.")
