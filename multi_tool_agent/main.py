@@ -69,7 +69,13 @@ async def summarize_filing(request: SummarizeRequest):
                     sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
                     return sorted_facts[0]['value']
                 return None
-            revenue = get_latest_value('Revenues')
+            # Check all common revenue tags
+            revenue = None
+            for tag in ['Revenues', 'Revenue', 'Sales', 'SalesRevenueNet', 'TotalRevenue', 'TotalSales']:
+                value = get_latest_value(tag)
+                if value is not None:
+                    revenue = value
+                    break
             net_income = get_latest_value('NetIncomeLoss')
             eps = get_latest_value('EarningsPerShareBasic')
             print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
@@ -107,6 +113,13 @@ async def summarize_filing(request: SummarizeRequest):
         print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
 
         # 6. Build the LLM prompt with both numbers and MDA
+        official_numbers = []
+        if revenue is not None:
+            official_numbers.append(f"Revenue: {revenue}")
+        if net_income is not None:
+            official_numbers.append(f"Net Income: {net_income}")
+        if eps is not None:
+            official_numbers.append(f"EPS: {eps}")
         prompt = (
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
@@ -118,9 +131,9 @@ async def summarize_filing(request: SummarizeRequest):
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
             "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
-            f"Official numbers for the period:\n"
-            f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
-            "Begin the podcast script now."
+            "Official numbers for the period:\n"
+            + "\n".join(official_numbers) +
+            "\n\nBegin the podcast script now."
         )
 
         # 7. Summarize

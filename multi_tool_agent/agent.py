@@ -696,19 +696,23 @@ class TTSAgent:
         if not text or not re.search(r'\w', text):
             print("[TTSAgent] Input text is empty or only punctuation/whitespace. Aborting TTS synthesis.")
             raise Exception("Input text for TTS is empty or invalid.")
-        # Post-process to fix minor tag formatting issues before splitting
-        text = re.sub(r'^(alex|jamie)\s*:?\s*', lambda m: m.group(1).upper() + ':', text, flags=re.MULTILINE)
-        # Also fix common mistakes (e.g., lowercase, missing colon, extra spaces)
-        text = re.sub(r'^(host\s*1:|host\s*one:)', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
-        text = re.sub(r'^(host\s*2:|host\s*two:)', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
-        # Restore original splitting logic: split by ALEX: and JAMIE: only, no forced alternation
+        # Strictly enforce that every non-empty line starts with 'ALEX:' or 'JAMIE:' before splitting
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        valid_lines = []
+        for line in lines:
+            if line.startswith('ALEX:') or line.startswith('JAMIE:'):
+                valid_lines.append(line)
+            else:
+                print(f"[TTSAgent] Warning: Skipping line without valid speaker tag: {line}")
+        # Debug: print the first 10 lines of the transcript
+        print("[TTSAgent] First 10 lines of transcript after normalization:")
+        for l in valid_lines[:10]:
+            print(l)
+        # Restore original splitting logic: split by ALEX: and JAMIE: only
         parts = []
         current_speaker = None
         current_text = []
-        for line in text.split('\n'):
-            line = line.strip()
-            if not line or not re.search(r'\w', line):
-                continue
+        for line in valid_lines:
             if line.startswith('ALEX:'):
                 if current_speaker and current_text:
                     parts.append((current_speaker, ' '.join(current_text)))
@@ -719,11 +723,12 @@ class TTSAgent:
                     parts.append((current_speaker, ' '.join(current_text)))
                 current_speaker = 'JAMIE'
                 current_text = [line[6:].strip()]
-            else:
-                current_text.append(line)
         if current_speaker and current_text:
             parts.append((current_speaker, ' '.join(current_text)))
-        print(f"[TTSAgent] Speaker segments (restored logic): {[(speaker, segment[:40]) for speaker, segment in parts]}")
+        # Debug: print the assigned speaker for each segment
+        print("[TTSAgent] Speaker segments:")
+        for speaker, segment in parts[:10]:
+            print(f"{speaker}: {segment[:40]}")
         def add_sentence_pauses(text):
             return re.sub(r'([.!?])', r'\1<break time="400ms"/>', text)
         audio_segments = []
