@@ -149,13 +149,14 @@ async def summarize_filing(request: SummarizeRequest):
             # After translation, preserve speaker tags if present, only alternate if missing
             lines = [line for line in transcript.split('\n') if line.strip()]
             normalized_lines = []
-            for i, line in enumerate(lines):
-                if line.startswith('ALEX:') or line.startswith('JAMIE:'):
-                    normalized_lines.append(line)
+            for line in lines:
+                if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
+                    normalized_lines.append(line.strip())
                 else:
                     tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
-                    normalized_lines.append(f"{tag} {line}")
+                    normalized_lines.append(f"{tag} {line.strip()}")
             transcript = '\n'.join(normalized_lines)
+            print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
                 print("[main] Translation failed or fell back to English, using English TTS.")

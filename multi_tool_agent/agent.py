@@ -607,28 +607,27 @@ class TTSAgent:
                 except Exception:
                     return str(num)
             return str(num)
-        # Localize numbers in the text for non-English languages
+        # Use num2words for large integer numbers with commas (e.g., $391,928,000) in all languages
+        try:
+            from num2words import num2words
+        except ImportError:
+            num2words = None
+        def number_to_words(match):
+            num_str = match.group(0).replace(',', '').replace('$', '')
+            try:
+                num = int(num_str)
+                if num2words:
+                    return num2words(num, lang=lang_key)
+                else:
+                    return match.group(0)
+            except Exception:
+                return match.group(0)
+        # Only replace large integer numbers with commas, not decimals or billions
+        text = re.sub(r'\$?\b(\d{1,3}(?:,\d{3})+)\b(?!\.?\d|\s*(billion|million|억|만|조|千|百|thousand|million|billion))',
+                      lambda m: ('$' if m.group(0).startswith('$') else '') + number_to_words(m), text)
         if lang_key != 'en':
             # Replace numbers with localized format
             text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
-            # Use num2words for large integer numbers with commas (e.g., $391,928,000)
-            try:
-                from num2words import num2words
-            except ImportError:
-                num2words = None
-            def number_to_words(match):
-                num_str = match.group(0).replace(',', '').replace('$', '')
-                try:
-                    num = int(num_str)
-                    if num2words:
-                        return num2words(num, lang=lang_key)
-                    else:
-                        return match.group(0)
-                except Exception:
-                    return match.group(0)
-            # Only replace large integer numbers with commas, not decimals or billions
-            text = re.sub(r'\$?\b(\d{1,3}(?:,\d{3})+)\b(?!\.?\d|\s*(billion|million|억|만|조|千|百|thousand|million|billion))',
-                          lambda m: ('$' if m.group(0).startswith('$') else '') + number_to_words(m), text)
             # Use num2words for number reading in all supported languages
             try:
                 from num2words import num2words
