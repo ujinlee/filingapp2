@@ -70,7 +70,7 @@ async def summarize_filing(request: SummarizeRequest):
                         sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
                         return sorted_facts[0]['value']
                 return None
-            revenue_tags = ['Revenue', 'Revenues', 'TotalRevenue', 'TotalRevenues', 'TotalSales', 'Sales']
+            revenue_tags = ['Revenue', 'Revenues', 'TotalRevenue', 'TotalRevenues', 'TotalSales', 'Sales', 'NetSales', 'NetRevenue', 'NetRevenues']
             revenue = get_latest_value(revenue_tags)
             net_income = get_latest_value(['NetIncomeLoss'])
             eps = get_latest_value(['EarningsPerShareBasic'])
