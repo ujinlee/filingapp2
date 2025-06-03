@@ -603,8 +603,17 @@ class TTSAgent:
         if lang_key != 'en':
             # Replace numbers with localized format
             text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
-            # Handle decimal points in non-English languages
-            text = re.sub(r'(\d+)\.(\d+)', lambda m: f"{m.group(1)} point {m.group(2)}", text)
+            # Handle decimal points in non-English languages, especially Korean
+            def decimal_to_korean(match):
+                left = match.group(1)
+                right = match.group(2)
+                if lang_key == 'ko' and left == '0':
+                    left_kor = '영'
+                else:
+                    left_kor = left
+                right_digits = ' '.join(list(right))
+                return f"{left_kor} point {right_digits}"
+            text = re.sub(r'(\d+)\.(\d+)', decimal_to_korean, text)
             text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', lambda m: localize_number(m.group(1)), text)
         # Convert years like 2025 to 'twenty twenty-five' (English only)
         if lang_key == 'en':
@@ -737,12 +746,13 @@ class TTSAgent:
             try:
                 print(f"[TTSAgent] Synthesizing segment for speaker {speaker} in {language}")
                 if lang_key in voice_map:
+                    # Always use male voice for ALEX and female voice for JAMIE
                     if speaker == 'ALEX':
-                        lang_code, voice_name, gender = voice_map[lang_key][0]
+                        lang_code, voice_name, gender = voice_map[lang_key][0]  # Male voice
                         pitch = "+2st"
                         break_time = "800ms"
                     else:
-                        lang_code, voice_name, gender = voice_map[lang_key][1]
+                        lang_code, voice_name, gender = voice_map[lang_key][1]  # Female voice
                         pitch = "-1st"
                         break_time = "1000ms"
                     print(f"[TTSAgent] Using voice: {voice_name} (gender: {gender}) for speaker {speaker} in language {language}")
