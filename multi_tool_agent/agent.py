@@ -403,61 +403,39 @@ class TranslationAgent:
         # Pre-format large numbers for local language units before translation
         def localize_large_numbers(text, lang):
             import re
-            # $X,XXX,XXX,XXX
-            def dollar_to_local(match):
-                num_str = match.group(1).replace(',', '')
-                try:
-                    num = float(num_str)
-                except Exception:
-                    return match.group(0)
-                if num >= 100_000_000:
-                    eok = round(num / 100_000_000, 1)
-                    if lang.startswith('ko'):
-                        return f"{eok}억 달러"
-                    elif lang.startswith('ja'):
-                        return f"{eok}億ドル"
-                    elif lang.startswith('zh'):
-                        return f"{eok}亿美元"
-                    elif lang.startswith('es'):
-                        return f"{round(num / 1_000_000_000, 2)} mil millones de dólares"
-                elif num >= 1_000_000:
-                    million = round(num / 1_000_000, 1)
-                    if lang.startswith('ko'):
-                        return f"{million}백만 달러"
-                    elif lang.startswith('ja'):
-                        return f"{million}百万ドル"
-                    elif lang.startswith('zh'):
-                        return f"{million}百万美元"
-                    elif lang.startswith('es'):
-                        return f"{million} millones de dólares"
-                return match.group(0)
-            # X billion dollars
             def billion_to_local(match):
-                num = float(match.group(1))
+                num = float(match.group(1).replace(',', ''))
+                # Only match exact billions
+                if num % 1 != 0:
+                    return match.group(0)
                 if lang.startswith('ko'):
-                    return f"{num * 10}억 달러"
+                    # 1 billion = 10억, 4 billion = 40억
+                    eok = int(num * 10)
+                    return f"{eok}억 달러"
                 elif lang.startswith('ja'):
-                    return f"{num * 10}億ドル"
+                    oku = int(num * 10)
+                    return f"{oku}億ドル"
                 elif lang.startswith('zh'):
-                    return f"{num * 10}亿美元"
-                elif lang.startswith('es'):
-                    return f"{num} mil millones de dólares"
-                return match.group(0)
-            # X million dollars
+                    yi = int(num * 10)
+                    return f"{yi}亿美元"
+                else:
+                    return f"{int(num)} billion dollars"
             def million_to_local(match):
-                num = float(match.group(1))
+                num = float(match.group(1).replace(',', ''))
+                if num % 1 != 0:
+                    return match.group(0)
                 if lang.startswith('ko'):
-                    return f"{num}백만 달러"
+                    return f"{int(num)}백만 달러"
                 elif lang.startswith('ja'):
-                    return f"{num}百万ドル"
+                    return f"{int(num)}百万ドル"
                 elif lang.startswith('zh'):
-                    return f"{num}百万美元"
-                elif lang.startswith('es'):
-                    return f"{num} millones de dólares"
-                return match.group(0)
-            text = re.sub(r'\$([\d,]+)', dollar_to_local, text)
-            text = re.sub(r'(\d+(?:\.\d+)?)\s*billion dollars', billion_to_local, text, flags=re.IGNORECASE)
-            text = re.sub(r'(\d+(?:\.\d+)?)\s*million dollars', million_to_local, text, flags=re.IGNORECASE)
+                    return f"{int(num)}百万美元"
+                else:
+                    return f"{int(num)} million dollars"
+            # Replace $X billion
+            text = re.sub(r'\$([\d,]+)\s*billion', billion_to_local, text, flags=re.IGNORECASE)
+            # Replace $X million
+            text = re.sub(r'\$([\d,]+)\s*million', million_to_local, text, flags=re.IGNORECASE)
             return text
         # Only localize for non-English
         if not target_language.startswith('en'):
@@ -696,23 +674,19 @@ class TTSAgent:
         if not text or not re.search(r'\w', text):
             print("[TTSAgent] Input text is empty or only punctuation/whitespace. Aborting TTS synthesis.")
             raise Exception("Input text for TTS is empty or invalid.")
-        # Strictly enforce that every non-empty line starts with 'ALEX:' or 'JAMIE:' before splitting
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        valid_lines = []
-        for line in lines:
-            if line.startswith('ALEX:') or line.startswith('JAMIE:'):
-                valid_lines.append(line)
-            else:
-                print(f"[TTSAgent] Warning: Skipping line without valid speaker tag: {line}")
-        # Debug: print the first 10 lines of the transcript
-        print("[TTSAgent] First 10 lines of transcript after normalization:")
-        for l in valid_lines[:10]:
-            print(l)
-        # Restore original splitting logic: split by ALEX: and JAMIE: only
+        # Post-process to fix minor tag formatting issues before splitting
+        text = re.sub(r'^(alex|jamie)\s*:?\s*', lambda m: m.group(1).upper() + ':', text, flags=re.MULTILINE)
+        # Also fix common mistakes (e.g., lowercase, missing colon, extra spaces)
+        text = re.sub(r'^(host\s*1:|host\s*one:)', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
+        text = re.sub(r'^(host\s*2:|host\s*two:)', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
+        # Restore original splitting logic: split by ALEX: and JAMIE: only, no forced alternation
         parts = []
         current_speaker = None
         current_text = []
-        for line in valid_lines:
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line or not re.search(r'\w', line):
+                continue
             if line.startswith('ALEX:'):
                 if current_speaker and current_text:
                     parts.append((current_speaker, ' '.join(current_text)))
@@ -723,12 +697,11 @@ class TTSAgent:
                     parts.append((current_speaker, ' '.join(current_text)))
                 current_speaker = 'JAMIE'
                 current_text = [line[6:].strip()]
+            else:
+                current_text.append(line)
         if current_speaker and current_text:
             parts.append((current_speaker, ' '.join(current_text)))
-        # Debug: print the assigned speaker for each segment
-        print("[TTSAgent] Speaker segments:")
-        for speaker, segment in parts[:10]:
-            print(f"{speaker}: {segment[:40]}")
+        print(f"[TTSAgent] Speaker segments (restored logic): {[(speaker, segment[:40]) for speaker, segment in parts]}")
         def add_sentence_pauses(text):
             return re.sub(r'([.!?])', r'\1<break time="400ms"/>', text)
         audio_segments = []

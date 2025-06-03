@@ -69,25 +69,22 @@ async def summarize_filing(request: SummarizeRequest):
                     sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
                     return sorted_facts[0]['value']
                 return None
-            # Check all common revenue tags
-            revenue = None
-            for tag in ['Revenues', 'Revenue', 'Sales', 'SalesRevenueNet', 'TotalRevenue', 'TotalSales']:
-                value = get_latest_value(tag)
-                if value is not None:
-                    revenue = value
-                    break
+            revenue = get_latest_value('Revenues')
             net_income = get_latest_value('NetIncomeLoss')
             eps = get_latest_value('EarningsPerShareBasic')
+            print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
+            print(f"[DEBUG] All XBRL facts: {xbrl_facts}")
         except Exception as e:
-            raise HTTPException(status_code=404, detail="Unable to find financial data for this company. Please try a different ticker or company name.")
+            print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
 
         # 3. Separately fetch the cleaned text for MDA extraction and summarization
         try:
-            content, error = SECAgent.fetch_document(request.documentUrl)
-            if error:
-                raise HTTPException(status_code=404, detail=error)
-            if not content or len(content) < 100:
-                raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
+        content, error = SECAgent.fetch_document(request.documentUrl)
+        if error:
+            raise HTTPException(status_code=404, detail=error)
+        if not content or len(content) < 100:
+            raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
         except Exception as e:
             print("[ERROR] Exception fetching/cleaning filing text:", traceback.format_exc())
             raise
@@ -107,15 +104,9 @@ async def summarize_filing(request: SummarizeRequest):
         mda_section = SummarizationAgent.extract_mda_section(content, filing_summary_url, base_url)
         if mda_section is None:
             mda_section = "[MDA section not found in filing.]"
+        print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
 
         # 6. Build the LLM prompt with both numbers and MDA
-        official_numbers = []
-        if revenue is not None:
-            official_numbers.append(f"Revenue: {revenue}")
-        if net_income is not None:
-            official_numbers.append(f"Net Income: {net_income}")
-        if eps is not None:
-            official_numbers.append(f"EPS: {eps}")
         prompt = (
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
@@ -127,38 +118,36 @@ async def summarize_filing(request: SummarizeRequest):
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
             "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
-            "Official numbers for the period:\n"
-            + "\n".join(official_numbers) +
-            "\n\nBegin the podcast script now."
+            f"Official numbers for the period:\n"
+            f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
+            "Begin the podcast script now."
         )
 
         # 7. Summarize
         summary = SummarizationAgent.summarize(prompt)
+
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
-        print("\n=== Final Podcast Script ===\n")
-        print(summary)
-        print("\n==========================\n")
 
         # 8. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
-            # After translation, enforce strict alternation of speaker tags, always starting with ALEX, by stripping all tags (including translated ones) and reassigning
+            # After translation, enforce strict alternation of speaker tags, always starting with ALEX, by stripping all tags and reassigning
             lines = [line for line in transcript.split('\n') if line.strip()]
             normalized_lines = []
             speakers = ['ALEX', 'JAMIE']
             for i, line in enumerate(lines):
-                # Remove any existing speaker tag (including translated ones)
-                content = re.sub(r'^(ALEX:|JAMIE:|알렉스:|제이미:)', '', line, flags=re.IGNORECASE).strip()
+                # Remove any existing speaker tag
+                content = re.sub(r'^(ALEX:|JAMIE:)', '', line, flags=re.IGNORECASE).strip()
                 normalized_lines.append(f"{speakers[i % 2]}: {content}")
             transcript = '\n'.join(normalized_lines)
-            print("[INFO] Final podcast transcript:")
-            print(transcript)
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
+                print("[main] Translation failed or fell back to English, using English TTS.")
                 tts_language = 'en-US'
         except Exception as e:
-            raise HTTPException(status_code=500, detail="Translation failed. Please try again.")
+            print("[ERROR] Exception in translation:", traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
 
         # 9. Generate audio
         try:
