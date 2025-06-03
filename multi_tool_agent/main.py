@@ -80,11 +80,11 @@ async def summarize_filing(request: SummarizeRequest):
 
         # 3. Separately fetch the cleaned text for MDA extraction and summarization
         try:
-        content, error = SECAgent.fetch_document(request.documentUrl)
-        if error:
-            raise HTTPException(status_code=404, detail=error)
-        if not content or len(content) < 100:
-            raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
+            content, error = SECAgent.fetch_document(request.documentUrl)
+            if error:
+                raise HTTPException(status_code=404, detail=error)
+            if not content or len(content) < 100:
+                raise HTTPException(status_code=400, detail="Filing content is empty or too short to summarize.")
         except Exception as e:
             print("[ERROR] Exception fetching/cleaning filing text:", traceback.format_exc())
             raise
