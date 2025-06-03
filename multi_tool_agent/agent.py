@@ -615,6 +615,7 @@ class TTSAgent:
             def decimal_to_local(match):
                 left = match.group(1)
                 right = match.group(2)
+                print(f"[DEBUG] decimal_to_local: left={left}, right={right}, lang_key={lang_key}")
                 if lang_key == 'ko':
                     sep = '점'
                     if left == '0':
