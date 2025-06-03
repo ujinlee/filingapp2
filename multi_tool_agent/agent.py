@@ -611,6 +611,24 @@ class TTSAgent:
         if lang_key != 'en':
             # Replace numbers with localized format
             text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
+            # Use num2words for large integer numbers with commas (e.g., $391,928,000)
+            try:
+                from num2words import num2words
+            except ImportError:
+                num2words = None
+            def number_to_words(match):
+                num_str = match.group(0).replace(',', '').replace('$', '')
+                try:
+                    num = int(num_str)
+                    if num2words:
+                        return num2words(num, lang=lang_key)
+                    else:
+                        return match.group(0)
+                except Exception:
+                    return match.group(0)
+            # Only replace large integer numbers with commas, not decimals or billions
+            text = re.sub(r'\$?\b(\d{1,3}(?:,\d{3})+)\b(?!\.?\d|\s*(billion|million|억|만|조|千|百|thousand|million|billion))',
+                          lambda m: ('$' if m.group(0).startswith('$') else '') + number_to_words(m), text)
             # Use num2words for number reading in all supported languages
             try:
                 from num2words import num2words
@@ -762,7 +780,7 @@ class TTSAgent:
         voice_map = {
             'en': (('en-US', 'en-US-Wavenet-D', texttospeech.SsmlVoiceGender.MALE),
                    ('en-US', 'en-US-Wavenet-F', texttospeech.SsmlVoiceGender.FEMALE)),
-            'ko': (('ko-KR', 'ko-KR-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
+            'ko': (('ko-KR', 'ko-KR-Standard-B', texttospeech.SsmlVoiceGender.MALE),  # Try Standard-B if Wavenet-B is not male
                    ('ko-KR', 'ko-KR-Wavenet-C', texttospeech.SsmlVoiceGender.FEMALE)),
             'ja': (('ja-JP', 'ja-JP-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
                    ('ja-JP', 'ja-JP-Wavenet-A', texttospeech.SsmlVoiceGender.FEMALE)),
@@ -788,16 +806,20 @@ class TTSAgent:
             try:
                 print(f"[TTSAgent] Synthesizing segment for speaker {speaker} in {language}")
                 if lang_key in voice_map:
-                    # Always use male voice for ALEX and female voice for JAMIE
-                    if speaker == 'ALEX':
+                    # Always use male voice for ALEX and female voice for JAMIE (case-insensitive, strip whitespace)
+                    if speaker.strip().upper() == 'ALEX':
                         lang_code, voice_name, gender = voice_map[lang_key][0]  # Male voice
                         pitch = "+2st"
                         break_time = "800ms"
-                    else:
+                    elif speaker.strip().upper() == 'JAMIE':
                         lang_code, voice_name, gender = voice_map[lang_key][1]  # Female voice
                         pitch = "-1st"
                         break_time = "1000ms"
-                    print(f"[TTSAgent] Using voice: {voice_name} (gender: {gender}) for speaker {speaker} in language {language}")
+                    else:
+                        lang_code, voice_name, gender = voice_map[lang_key][0]
+                        pitch = "0st"
+                        break_time = "800ms"
+                    print(f"[DEBUG] Speaker: '{speaker}', Voice: {voice_name}, Gender: {gender}, Language: {lang_code}, Text: {segment[:50]}")
                     voice = texttospeech.VoiceSelectionParams(
                         language_code=lang_code,
                         name=voice_name,
