@@ -611,13 +611,14 @@ class TTSAgent:
         if lang_key != 'en':
             # Replace numbers with localized format
             text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
-            # Handle decimal points in non-English languages, digit by digit, but do not affect large number localization
+            # Handle decimal points in non-English languages, digit by digit, but only use '영' for 0.XX in Korean
             def decimal_to_local(match):
                 left = match.group(1)
                 right = match.group(2)
-                if lang_key == 'ko' and left == '0':
-                    left = '영'
+                if lang_key == 'ko':
                     sep = '점'
+                    if left == '0':
+                        left = '영'
                 else:
                     sep = 'point'
                 right_digits = ' '.join(list(right))
