@@ -405,37 +405,45 @@ class TranslationAgent:
             import re
             def billion_to_local(match):
                 num = float(match.group(1).replace(',', ''))
-                # Only match exact billions
-                if num % 1 != 0:
-                    return match.group(0)
+                # Only match exact billions or decimals
                 if lang.startswith('ko'):
-                    # 1 billion = 10억, 4 billion = 40억
-                    eok = int(num * 10)
-                    return f"{eok}억 달러"
+                    # 1 billion = 10억, 4 billion = 40억, 18.77 billion = 187.7억
+                    eok = num * 10
+                    if eok.is_integer():
+                        eok_str = str(int(eok))
+                    else:
+                        eok_str = str(eok)
+                    return f"{eok_str}억 달러"
                 elif lang.startswith('ja'):
-                    oku = int(num * 10)
-                    return f"{oku}億ドル"
+                    oku = num * 10
+                    if oku.is_integer():
+                        oku_str = str(int(oku))
+                    else:
+                        oku_str = str(oku)
+                    return f"{oku_str}億ドル"
                 elif lang.startswith('zh'):
-                    yi = int(num * 10)
-                    return f"{yi}亿美元"
+                    yi = num * 10
+                    if yi.is_integer():
+                        yi_str = str(int(yi))
+                    else:
+                        yi_str = str(yi)
+                    return f"{yi_str}亿美元"
                 else:
-                    return f"{int(num)} billion dollars"
+                    return f"{num} billion dollars"
             def million_to_local(match):
                 num = float(match.group(1).replace(',', ''))
-                if num % 1 != 0:
-                    return match.group(0)
                 if lang.startswith('ko'):
-                    return f"{int(num)}백만 달러"
+                    return f"{num}백만 달러"
                 elif lang.startswith('ja'):
-                    return f"{int(num)}百万ドル"
+                    return f"{num}百万ドル"
                 elif lang.startswith('zh'):
-                    return f"{int(num)}百万美元"
+                    return f"{num}百万美元"
                 else:
-                    return f"{int(num)} million dollars"
-            # Replace $X billion
-            text = re.sub(r'\$([\d,]+)\s*billion', billion_to_local, text, flags=re.IGNORECASE)
+                    return f"{num} million dollars"
+            # Replace $X billion (with decimals)
+            text = re.sub(r'\$([\d,.]+)\s*billion', billion_to_local, text, flags=re.IGNORECASE)
             # Replace $X million
-            text = re.sub(r'\$([\d,]+)\s*million', million_to_local, text, flags=re.IGNORECASE)
+            text = re.sub(r'\$([\d,.]+)\s*million', million_to_local, text, flags=re.IGNORECASE)
             return text
         # Only localize for non-English
         if not target_language.startswith('en'):
@@ -603,17 +611,18 @@ class TTSAgent:
         if lang_key != 'en':
             # Replace numbers with localized format
             text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
-            # Handle decimal points in non-English languages, especially Korean
-            def decimal_to_korean(match):
+            # Handle decimal points in non-English languages, digit by digit, but do not affect large number localization
+            def decimal_to_local(match):
                 left = match.group(1)
                 right = match.group(2)
                 if lang_key == 'ko' and left == '0':
-                    left_kor = '영'
+                    left = '영'
+                    sep = '점'
                 else:
-                    left_kor = left
+                    sep = 'point'
                 right_digits = ' '.join(list(right))
-                return f"{left_kor} point {right_digits}"
-            text = re.sub(r'(\d+)\.(\d+)', decimal_to_korean, text)
+                return f"{left} {sep} {right_digits}"
+            text = re.sub(r'(?<![\d])(\d+)\.(\d+)(?![\d])', decimal_to_local, text)
             text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', lambda m: localize_number(m.group(1)), text)
         # Convert years like 2025 to 'twenty twenty-five' (English only)
         if lang_key == 'en':
