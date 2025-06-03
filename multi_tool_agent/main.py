@@ -78,10 +78,8 @@ async def summarize_filing(request: SummarizeRequest):
                     break
             net_income = get_latest_value('NetIncomeLoss')
             eps = get_latest_value('EarningsPerShareBasic')
-            print(f"[INFO] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
         except Exception as e:
-            print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
+            raise HTTPException(status_code=404, detail="Unable to find financial data for this company. Please try a different ticker or company name.")
 
         # 3. Separately fetch the cleaned text for MDA extraction and summarization
         try:
@@ -138,8 +136,9 @@ async def summarize_filing(request: SummarizeRequest):
         summary = SummarizationAgent.summarize(prompt)
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
-        print("[INFO] Final podcast summary:")
+        print("\n=== Final Podcast Script ===\n")
         print(summary)
+        print("\n==========================\n")
 
         # 8. Translate
         try:
@@ -157,11 +156,9 @@ async def summarize_filing(request: SummarizeRequest):
             print(transcript)
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
-                print("[main] Translation failed or fell back to English, using English TTS.")
                 tts_language = 'en-US'
         except Exception as e:
-            print("[ERROR] Exception in translation:", traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Translation failed. Please try again.")
 
         # 9. Generate audio
         try:
