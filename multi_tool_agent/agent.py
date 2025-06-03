@@ -413,21 +413,21 @@ class TranslationAgent:
                 if num >= 100_000_000:
                     eok = round(num / 100_000_000, 1)
                     if lang.startswith('ko'):
-                        return f"{eok}억 달러"
+                        return f"{int(eok)} 억 달러"
                     elif lang.startswith('ja'):
-                        return f"{eok}億ドル"
+                        return f"{int(eok)} 億ドル"
                     elif lang.startswith('zh'):
-                        return f"{eok}亿美元"
+                        return f"{int(eok)} 亿美元"
                     elif lang.startswith('es'):
                         return f"{round(num / 1_000_000_000, 2)} mil millones de dólares"
                 elif num >= 1_000_000:
                     million = round(num / 1_000_000, 1)
                     if lang.startswith('ko'):
-                        return f"{million}백만 달러"
+                        return f"{int(million)} 백만 달러"
                     elif lang.startswith('ja'):
-                        return f"{million}百万ドル"
+                        return f"{int(million)} 百万ドル"
                     elif lang.startswith('zh'):
-                        return f"{million}百万美元"
+                        return f"{int(million)} 百万美元"
                     elif lang.startswith('es'):
                         return f"{million} millones de dólares"
                 return match.group(0)
@@ -435,11 +435,11 @@ class TranslationAgent:
             def billion_to_local(match):
                 num = float(match.group(1))
                 if lang.startswith('ko'):
-                    return f"{num * 10}억 달러"
+                    return f"{int(num*10)} 억 달러" if num < 100 else f"{int(num*10):,} 억 달러"
                 elif lang.startswith('ja'):
-                    return f"{num * 10}億ドル"
+                    return f"{int(num*10)} 億ドル"
                 elif lang.startswith('zh'):
-                    return f"{num * 10}亿美元"
+                    return f"{int(num*10)} 亿美元"
                 elif lang.startswith('es'):
                     return f"{num} mil millones de dólares"
                 return match.group(0)
@@ -447,17 +447,33 @@ class TranslationAgent:
             def million_to_local(match):
                 num = float(match.group(1))
                 if lang.startswith('ko'):
-                    return f"{num}백만 달러"
+                    return f"{int(num)} 백만 달러"
                 elif lang.startswith('ja'):
-                    return f"{num}百万ドル"
+                    return f"{int(num)} 百万ドル"
                 elif lang.startswith('zh'):
-                    return f"{num}百万美元"
+                    return f"{int(num)} 百万美元"
                 elif lang.startswith('es'):
                     return f"{num} millones de dólares"
                 return match.group(0)
+            # Convert decimals to words for Korean/Japanese/Chinese
+            def decimal_to_words(match):
+                num = match.group(0)
+                left, right = num.split('.')
+                if lang.startswith('ko'):
+                    return f"영점 {' '.join([str(int(d)) for d in right])}"
+                elif lang.startswith('ja'):
+                    return f"ゼロ点{''.join([str(int(d)) for d in right])}"
+                elif lang.startswith('zh'):
+                    return f"零点{''.join([str(int(d)) for d in right])}"
+                return num
+            # Remove markdown
+            text = re.sub(r'[\*\_\~\`]+', '', text)
             text = re.sub(r'\$([\d,]+)', dollar_to_local, text)
             text = re.sub(r'(\d+(?:\.\d+)?)\s*billion dollars', billion_to_local, text, flags=re.IGNORECASE)
             text = re.sub(r'(\d+(?:\.\d+)?)\s*million dollars', million_to_local, text, flags=re.IGNORECASE)
+            # Convert decimals for ko/ja/zh
+            if lang.startswith(('ko', 'ja', 'zh')):
+                text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
             return text
         # Only localize for non-English
         if not target_language.startswith('en'):
@@ -506,6 +522,7 @@ class TranslationAgent:
                     f"Translate the entire following podcast script to Korean. "
                     f"Use a polite, formal, and professional tone suitable for a business podcast, not casual speech. "
                     f"When you see numbers like '40억 달러', do not change the value or unit. Do not convert currencies. "
+                    f"When you see a number with a decimal point (e.g., 0.22 or marked as (decimal)), always read the decimal point clearly in Korean. "
                     f"Make the conversation sound natural and idiomatic in Korean, as if two professional podcast hosts are discussing the topic. "
                     f"Adapt expressions and flow for naturalness, not just literal translation. "
                     f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
@@ -517,6 +534,7 @@ class TranslationAgent:
                     f"Translate the entire following podcast script to Japanese. "
                     f"Use a polite, formal, and professional tone suitable for a business podcast, not casual speech. "
                     f"When you see numbers like '40億ドル', do not change the value or unit. Do not convert currencies. "
+                    f"When you see a number with a decimal point (e.g., 0.22 or marked as (decimal)), always read the decimal point clearly in Japanese. "
                     f"Make the conversation sound natural and idiomatic in Japanese, as if two professional podcast hosts are discussing the topic. "
                     f"Adapt expressions and flow for naturalness, not just literal translation. "
                     f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
@@ -528,6 +546,7 @@ class TranslationAgent:
                     f"Translate the entire following podcast script to Chinese. "
                     f"Use a polite, formal, and professional tone suitable for a business podcast, not casual speech. "
                     f"When you see numbers like '40亿美元', do not change the value or unit. Do not convert currencies. "
+                    f"When you see a number with a decimal point (e.g., 0.22 or marked as (decimal)), always read the decimal point clearly in Chinese. "
                     f"Make the conversation sound natural and idiomatic in Chinese, as if two professional podcast hosts are discussing the topic. "
                     f"Adapt expressions and flow for naturalness, not just literal translation. "
                     f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
@@ -537,6 +556,7 @@ class TranslationAgent:
             else:
                 prompt = (
                     f"Translate the entire following podcast script to {target_language}. "
+                    f"When you see a number with a decimal point (e.g., 0.22 or marked as (decimal)), always read the decimal point clearly in the target language. "
                     f"Make the conversation sound natural and idiomatic in {target_language}, as if two native speakers are discussing the topic. "
                     f"Adapt expressions and flow for naturalness, not just literal translation. "
                     f"IMPORTANT: Translate the entire script below, do not skip any part. Keep the exact same dialogue structure with 'ALEX:' and 'JAMIE:' tags at the start of each line. "
@@ -736,8 +756,8 @@ class TTSAgent:
         voice_map = {
             'en': (('en-US', 'en-US-Wavenet-D', texttospeech.SsmlVoiceGender.MALE),
                    ('en-US', 'en-US-Wavenet-F', texttospeech.SsmlVoiceGender.FEMALE)),
-            'ko': (('ko-KR', 'ko-KR-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
-                   ('ko-KR', 'ko-KR-Wavenet-C', texttospeech.SsmlVoiceGender.FEMALE)),
+            'ko': (('ko-KR', 'ko-KR-Wavenet-D', texttospeech.SsmlVoiceGender.MALE),
+                   ('ko-KR', 'ko-KR-Wavenet-A', texttospeech.SsmlVoiceGender.FEMALE)),
             'ja': (('ja-JP', 'ja-JP-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
                    ('ja-JP', 'ja-JP-Wavenet-A', texttospeech.SsmlVoiceGender.FEMALE)),
             'es': (('es-ES', 'es-ES-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
