@@ -611,19 +611,50 @@ class TTSAgent:
         if lang_key != 'en':
             # Replace numbers with localized format
             text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
-            # Handle decimal points in non-English languages, digit by digit, but only use '영' for 0.XX in Korean
+            # Use num2words for number reading in all supported languages
+            try:
+                from num2words import num2words
+            except ImportError:
+                num2words = None
             def decimal_to_local(match):
                 left = match.group(1)
                 right = match.group(2)
-                print(f"[DEBUG] decimal_to_local: left={left}, right={right}, lang_key={lang_key}")
-                if lang_key == 'ko':
-                    sep = '점'
+                sep_map = {
+                    'ko': '점',
+                    'ja': '点',
+                    'zh': '点',
+                    'es': 'coma',
+                    'fr': 'virgule',
+                    'de': 'Komma',
+                    'en': 'point'
+                }
+                sep = sep_map.get(lang_key, 'point')
+                if num2words:
+                    # Use num2words for the integer part
                     if left == '0':
-                        left = '영'
+                        left_word = {
+                            'ko': '영',
+                            'ja': 'ゼロ',
+                            'zh': '零',
+                            'es': 'cero',
+                            'fr': 'zéro',
+                            'de': 'null',
+                            'en': 'zero'
+                        }.get(lang_key, 'zero')
+                    else:
+                        try:
+                            left_word = num2words(int(left), lang=lang_key)
+                        except Exception:
+                            left_word = left
+                    # Digit-by-digit for the decimal part
+                    try:
+                        right_word = ' '.join([num2words(int(d), lang=lang_key) for d in right])
+                    except Exception:
+                        right_word = ' '.join(list(right))
                 else:
-                    sep = 'point'
-                right_digits = ' '.join(list(right))
-                return f"{left} {sep} {right_digits}"
+                    left_word = left
+                    right_word = ' '.join(list(right))
+                return f"{left_word} {sep} {right_word}"
             text = re.sub(r'(?<![\d])(\d+)\.(\d+)(?![\d])', decimal_to_local, text)
             text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', lambda m: localize_number(m.group(1)), text)
         # Convert years like 2025 to 'twenty twenty-five' (English only)
