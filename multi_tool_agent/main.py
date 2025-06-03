@@ -64,14 +64,16 @@ async def summarize_filing(request: SummarizeRequest):
         # 2. Extract official numbers from Arelle/XBRL using the raw HTML index page
         try:
             xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
-            def get_latest_value(tag):
-                if tag in xbrl_facts and xbrl_facts[tag]:
-                    sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
-                    return sorted_facts[0]['value']
+            def get_latest_value(possible_tags):
+                for tag in possible_tags:
+                    if tag in xbrl_facts and xbrl_facts[tag]:
+                        sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
+                        return sorted_facts[0]['value']
                 return None
-            revenue = get_latest_value('Revenues')
-            net_income = get_latest_value('NetIncomeLoss')
-            eps = get_latest_value('EarningsPerShareBasic')
+            revenue_tags = ['Revenue', 'Revenues', 'TotalRevenue', 'TotalRevenues', 'TotalSales', 'Sales']
+            revenue = get_latest_value(revenue_tags)
+            net_income = get_latest_value(['NetIncomeLoss'])
+            eps = get_latest_value(['EarningsPerShareBasic'])
             print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
             print(f"[DEBUG] All XBRL facts: {xbrl_facts}")
         except Exception as e:
@@ -107,7 +109,19 @@ async def summarize_filing(request: SummarizeRequest):
         print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
 
         # 6. Build the LLM prompt with both numbers and MDA
+        numbers_section = ""
+        if revenue:
+            numbers_section += f"Revenue: {revenue}\n"
+        if net_income:
+            numbers_section += f"Net Income: {net_income}\n"
+        if eps:
+            numbers_section += f"EPS: {eps}\n"
+        if not numbers_section:
+            numbers_section = "(No official numbers were found for this period.)\n"
+
         prompt = (
+            "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
+            "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
             "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL). "
@@ -119,7 +133,7 @@ async def summarize_filing(request: SummarizeRequest):
             "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
             f"Official numbers for the period:\n"
-            f"Revenue: {revenue}\nNet Income: {net_income}\nEPS: {eps}\n\n"
+            f"{numbers_section}\n"
             "Begin the podcast script now."
         )
 
