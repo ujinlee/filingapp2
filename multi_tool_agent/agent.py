@@ -603,6 +603,8 @@ class TTSAgent:
         if lang_key != 'en':
             # Replace numbers with localized format
             text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
+            # Handle decimal points in non-English languages
+            text = re.sub(r'(\d+)\.(\d+)', lambda m: f"{m.group(1)} point {m.group(2)}", text)
             text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', lambda m: localize_number(m.group(1)), text)
         # Convert years like 2025 to 'twenty twenty-five' (English only)
         if lang_key == 'en':
