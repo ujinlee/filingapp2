@@ -68,12 +68,27 @@ async def summarize_filing(request: SummarizeRequest):
             def get_latest_value(possible_tags):
                 for tag in possible_tags:
                     if tag in xbrl_facts and xbrl_facts[tag]:
-                        sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
-                        return sorted_facts[0]['value']
+                        value = xbrl_facts[tag]
+                        print(f"[DEBUG] xbrl_facts['{tag}'] actual value: {value}")
+                        # If it's a list of dicts with 'value', get the latest by 'period'
+                        if isinstance(value, list):
+                            if all(isinstance(item, dict) and 'value' in item for item in value):
+                                sorted_facts = sorted(value, key=lambda x: x.get('period') or '', reverse=True)
+                                return sorted_facts[0]['value']
+                            # If it's a list of values, just return the first
+                            elif all(not isinstance(item, dict) for item in value):
+                                return value[0]
+                        # If it's a dict with 'value'
+                        elif isinstance(value, dict) and 'value' in value:
+                            return value['value']
+                        # If it's a single value
+                        else:
+                            return value
                 return None
             revenue_tags = [
                 'Revenues', 'Revenue', 'TotalRevenues', 'TotalRevenue', 'Sales', 'SalesRevenueNet',
-                'us-gaap:Revenues', 'us-gaap:SalesRevenueNet', 'us-gaap:TotalRevenues', 'us-gaap:Revenue'
+                'us-gaap:Revenues', 'us-gaap:SalesRevenueNet', 'us-gaap:TotalRevenues', 'us-gaap:Revenue',
+                'NetSales', 'NetRevenue', 'NetRevenues', 'us-gaap:NetSales', 'us-gaap:NetRevenue', 'us-gaap:NetRevenues'
             ]
             revenue = get_latest_value(revenue_tags)
             net_income = get_latest_value(['NetIncomeLoss'])
