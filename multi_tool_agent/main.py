@@ -86,9 +86,30 @@ async def summarize_filing(request: SummarizeRequest):
                             return value
                 return None
             revenue_tags = [
-                'Revenues', 'Revenue', 'TotalRevenues', 'TotalRevenue', 'Sales', 'SalesRevenueNet',
-                'us-gaap:Revenues', 'us-gaap:SalesRevenueNet', 'us-gaap:TotalRevenues', 'us-gaap:Revenue',
-                'NetSales', 'NetRevenue', 'NetRevenues', 'us-gaap:NetSales', 'us-gaap:NetRevenue', 'us-gaap:NetRevenues'
+                "Revenues",
+                "Revenue",
+                "SalesRevenueNet",
+                "SalesRevenueServicesNet",
+                "SalesRevenueGoodsNet",
+                "RevenueFromContractWithCustomerExcludingAssessedTax",
+                "RevenuesNetOfInterestExpense",
+                "TotalRevenuesAndOtherIncome",
+                "OperatingRevenue",
+                "TopLineRevenue",
+                "TotalRevenues",
+                "RevenueFromRelatedParties",
+                "InterestAndDividendIncomeOperating",
+                "OilAndGasRevenue",
+                "RealEstateRevenueNet",
+                "HealthcareRevenue",
+                "MembershipRevenue",
+                "GamingRevenue",
+                "MediaRevenue",
+                "AdvertisingRevenue",
+                "TuitionRevenue",
+                "TotalOperatingRevenue",
+                "GrossRevenue",
+                "RevenueBeforeRoyalties",
             ]
             revenue = get_latest_value(revenue_tags)
             net_income = get_latest_value(['NetIncomeLoss'])
