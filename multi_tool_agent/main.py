@@ -199,7 +199,6 @@ async def summarize_filing(request: SummarizeRequest):
             transcript = '\n'.join(normalized_lines)
             # Ensure 'Filing Talk' is always in English in Korean transcript
             if request.language.startswith('ko'):
-                import re
                 transcript = re.sub(r'파일링 ?토크', 'Filing Talk', transcript, flags=re.IGNORECASE)
             print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
             tts_language = request.language
