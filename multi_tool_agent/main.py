@@ -90,16 +90,10 @@ async def summarize_filing(request: SummarizeRequest):
             base_revenue_tags = [
                 'Revenues',
                 'Revenue',
-                'Sales',
-                'NetSales',
-                'NetRevenue'
-                'NetRevenues'
-                'SalesRevenueNet'
-                'SalesRevenueNetMember',
+                'SalesRevenueNet',
                 'SalesRevenueServicesNet',
                 'SalesRevenueGoodsNet',
                 'RevenueFromContractWithCustomerExcludingAssessedTax',
-                'RevenueFromContractWithCustomerMember',
                 'RevenuesNetOfInterestExpense',
                 'TotalRevenuesAndOtherIncome',
                 'OperatingRevenue',
@@ -157,12 +151,24 @@ async def summarize_filing(request: SummarizeRequest):
             mda_section = "[MDA section not found in filing.]"
         print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
 
+        def humanize_large_number(n):
+            try:
+                n = float(n)
+                if n >= 1_000_000_000:
+                    return f"{n/1_000_000_000:.2f} billion"
+                elif n >= 1_000_000:
+                    return f"{n/1_000_000:.2f} million"
+                else:
+                    return str(int(n))
+            except Exception:
+                return str(n)
+
         # 6. Build the LLM prompt with both numbers and MDA
         numbers_section = ""
         if revenue:
-            numbers_section += f"Revenue: {revenue}\n"
+            numbers_section += f"Revenue: {humanize_large_number(revenue)}\n"
         if net_income:
-            numbers_section += f"Net Income: {net_income}\n"
+            numbers_section += f"Net Income: {humanize_large_number(net_income)}\n"
         if eps:
             numbers_section += f"EPS: {eps}\n"
         if not numbers_section:
