@@ -104,22 +104,8 @@ async def summarize_filing(request: SummarizeRequest):
                 'RevenueFromContractWithCustomerMember',
                 'RevenuesNetOfInterestExpense',
                 'TotalRevenuesAndOtherIncome',
-                'OperatingRevenue',
                 'TopLineRevenue',
                 'TotalRevenues',
-                'RevenueFromRelatedParties',
-                'InterestAndDividendIncomeOperating',
-                'OilAndGasRevenue',
-                'RealEstateRevenueNet',
-                'HealthcareRevenue',
-                'MembershipRevenue',
-                'GamingRevenue',
-                'MediaRevenue',
-                'AdvertisingRevenue',
-                'TuitionRevenue',
-                'TotalOperatingRevenue',
-                'GrossRevenue',
-                'RevenueBeforeRoyalties',
             ]
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
             revenue = get_latest_value(revenue_tags)
