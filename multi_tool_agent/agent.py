@@ -780,7 +780,7 @@ class TTSAgent:
             'en': (('en-US', 'en-US-Wavenet-D', texttospeech.SsmlVoiceGender.MALE),
                    ('en-US', 'en-US-Wavenet-F', texttospeech.SsmlVoiceGender.FEMALE)),
             'ko': (('ko-KR', 'ko-KR-Wavenet-C', texttospeech.SsmlVoiceGender.MALE),  # Try Standard-B if Wavenet-B is not male
-                   ('ko-KR', 'ko-KR-Wavenet-B', texttospeech.SsmlVoiceGender.FEMALE)),
+                   ('ko-KR', 'ko-KR-Wavenet-D', texttospeech.SsmlVoiceGender.FEMALE)),
             'ja': (('ja-JP', 'ja-JP-Wavenet-A', texttospeech.SsmlVoiceGender.MALE),
                    ('ja-JP', 'ja-JP-Wavenet-B', texttospeech.SsmlVoiceGender.FEMALE)),
             'es': (('es-ES', 'es-ES-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
