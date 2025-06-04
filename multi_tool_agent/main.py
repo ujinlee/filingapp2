@@ -66,12 +66,14 @@ async def summarize_filing(request: SummarizeRequest):
         # 2. Extract official numbers from Arelle/XBRL using the raw HTML index page
         try:
             xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
-            print(f"[DEBUG] All available XBRL tags: {list(xbrl_facts.keys())}")
+            # Remove or comment out verbose debug prints
+            # print(f"[DEBUG] All available XBRL tags: {list(xbrl_facts.keys())}")
             def get_latest_value(possible_tags):
                 for tag in possible_tags:
                     if tag in xbrl_facts and xbrl_facts[tag]:
                         value = xbrl_facts[tag]
-                        print(f"[DEBUG] xbrl_facts['{tag}'] actual value: {value}")
+                        # Remove or comment out verbose debug prints
+                        # print(f"[DEBUG] xbrl_facts['{tag}'] actual value: {value}")
                         # If it's a list of dicts with 'value', get the latest by 'period'
                         if isinstance(value, list):
                             if all(isinstance(item, dict) and 'value' in item for item in value):
@@ -123,8 +125,8 @@ async def summarize_filing(request: SummarizeRequest):
             revenue = get_latest_value(revenue_tags)
             net_income = get_latest_value(['NetIncomeLoss'])
             eps = get_latest_value(['EarningsPerShareBasic'])
-            print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
-            print(f"[DEBUG] All XBRL facts: {xbrl_facts}")
+            # Remove or comment out verbose debug prints
+            # print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
         except Exception as e:
             print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
@@ -155,7 +157,8 @@ async def summarize_filing(request: SummarizeRequest):
         mda_section = SummarizationAgent.extract_mda_section(content, filing_summary_url, base_url)
         if mda_section is None:
             mda_section = "[MDA section not found in filing.]"
-        print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
+        # Remove or comment out verbose debug prints
+        # print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
 
         def humanize_large_number(n):
             try:
@@ -220,7 +223,8 @@ async def summarize_filing(request: SummarizeRequest):
             # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
             if request.language.startswith('ko'):
                 transcript = re.sub(r'(Filing Talk|파일링 ?토크|필링 ?토크)', '파일링 토크', transcript, flags=re.IGNORECASE)
-            print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
+            # Remove or comment out verbose debug prints
+            # print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
                 print("[main] Translation failed or fell back to English, using English TTS.")
@@ -236,7 +240,8 @@ async def summarize_filing(request: SummarizeRequest):
             if not os.path.exists(audio_path):
                 raise HTTPException(status_code=500, detail=f"Audio file not found at {audio_path}")
             audio_url = f"/audio/{audio_filename}"
-            print(f"Audio URL: {audio_url}")
+            # Remove or comment out verbose debug prints
+            # print(f"Audio URL: {audio_url}")
         except Exception as e:
             print("[ERROR] Exception in TTS synthesis:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Text-to-Speech failed: {str(e)}")
