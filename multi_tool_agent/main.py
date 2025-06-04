@@ -64,13 +64,17 @@ async def summarize_filing(request: SummarizeRequest):
         # 2. Extract official numbers from Arelle/XBRL using the raw HTML index page
         try:
             xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
+            print(f"[DEBUG] All available XBRL tags: {list(xbrl_facts.keys())}")
             def get_latest_value(possible_tags):
                 for tag in possible_tags:
                     if tag in xbrl_facts and xbrl_facts[tag]:
                         sorted_facts = sorted(xbrl_facts[tag], key=lambda x: x['period'] or '', reverse=True)
                         return sorted_facts[0]['value']
                 return None
-            revenue_tags = ['Revenue', 'Revenues', 'TotalRevenue', 'TotalRevenues', 'TotalSales', 'Sales', 'NetSales', 'NetRevenue', 'NetRevenues']
+            revenue_tags = [
+                'Revenues', 'Revenue', 'TotalRevenues', 'TotalRevenue', 'Sales', 'SalesRevenueNet',
+                'us-gaap:Revenues', 'us-gaap:SalesRevenueNet', 'us-gaap:TotalRevenues', 'us-gaap:Revenue'
+            ]
             revenue = get_latest_value(revenue_tags)
             net_income = get_latest_value(['NetIncomeLoss'])
             eps = get_latest_value(['EarningsPerShareBasic'])
