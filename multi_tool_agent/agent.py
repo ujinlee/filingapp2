@@ -372,7 +372,7 @@ class TranslationAgent:
                     yi = num * 10
                     if yi.is_integer():
                         yi_str = str(int(yi))
-                else:
+                    else:
                         yi_str = str(yi)
                     return f"{yi_str}亿美元"
                 else:
