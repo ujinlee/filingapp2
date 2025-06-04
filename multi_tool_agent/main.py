@@ -85,32 +85,33 @@ async def summarize_filing(request: SummarizeRequest):
                         else:
                             return value
                 return None
-            revenue_tags = [
-                "Revenues",
-                "Revenue",
-                "SalesRevenueNet",
-                "SalesRevenueServicesNet",
-                "SalesRevenueGoodsNet",
-                "RevenueFromContractWithCustomerExcludingAssessedTax",
-                "RevenuesNetOfInterestExpense",
-                "TotalRevenuesAndOtherIncome",
-                "OperatingRevenue",
-                "TopLineRevenue",
-                "TotalRevenues",
-                "RevenueFromRelatedParties",
-                "InterestAndDividendIncomeOperating",
-                "OilAndGasRevenue",
-                "RealEstateRevenueNet",
-                "HealthcareRevenue",
-                "MembershipRevenue",
-                "GamingRevenue",
-                "MediaRevenue",
-                "AdvertisingRevenue",
-                "TuitionRevenue",
-                "TotalOperatingRevenue",
-                "GrossRevenue",
-                "RevenueBeforeRoyalties",
+            base_revenue_tags = [
+                'Revenues',
+                'Revenue',
+                'SalesRevenueNet',
+                'SalesRevenueServicesNet',
+                'SalesRevenueGoodsNet',
+                'RevenueFromContractWithCustomerExcludingAssessedTax',
+                'RevenuesNetOfInterestExpense',
+                'TotalRevenuesAndOtherIncome',
+                'OperatingRevenue',
+                'TopLineRevenue',
+                'TotalRevenues',
+                'RevenueFromRelatedParties',
+                'InterestAndDividendIncomeOperating',
+                'OilAndGasRevenue',
+                'RealEstateRevenueNet',
+                'HealthcareRevenue',
+                'MembershipRevenue',
+                'GamingRevenue',
+                'MediaRevenue',
+                'AdvertisingRevenue',
+                'TuitionRevenue',
+                'TotalOperatingRevenue',
+                'GrossRevenue',
+                'RevenueBeforeRoyalties',
             ]
+            revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
             revenue = get_latest_value(revenue_tags)
             net_income = get_latest_value(['NetIncomeLoss'])
             eps = get_latest_value(['EarningsPerShareBasic'])
@@ -196,6 +197,10 @@ async def summarize_filing(request: SummarizeRequest):
                     tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
                     normalized_lines.append(f"{tag} {line.strip()}")
             transcript = '\n'.join(normalized_lines)
+            # Ensure 'Filing Talk' is always in English in Korean transcript
+            if request.language.startswith('ko'):
+                import re
+                transcript = re.sub(r'파일링 ?토크', 'Filing Talk', transcript, flags=re.IGNORECASE)
             print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
