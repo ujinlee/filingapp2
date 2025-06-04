@@ -157,8 +157,8 @@ async def summarize_filing(request: SummarizeRequest):
         mda_section = SummarizationAgent.extract_mda_section(content, filing_summary_url, base_url)
         if mda_section is None:
             mda_section = "[MDA section not found in filing.]"
-        # Remove or comment out verbose debug prints
-        # print(f"[DEBUG] First 500 chars of extracted MDA section: {mda_section[:500]}")
+        # print(f"[extract_mda_section] Filing content preview: {content[:100]}")
+        # print(f"[extract_mda_section] FINAL fallback preview: {fallback_section[:100]}")
 
         def humanize_large_number(n):
             try:
@@ -202,7 +202,34 @@ async def summarize_filing(request: SummarizeRequest):
         )
 
         # 7. Summarize
-        summary = SummarizationAgent.summarize(prompt)
+        request_options = {
+            'method': 'POST',
+            'url': 'https://api.openai.com/v1/chat/completions',
+            'headers': {
+                'Authorization': f'Bearer {os.getenv("OPENAI_API_KEY")}',
+                'Content-Type': 'application/json'
+            },
+            'json': {
+                'model': 'gpt-3.5-turbo',
+                'messages': [
+                    {'role': 'user', 'content': prompt}
+                ]
+            }
+        }
+        print(f"[DEBUG] LLM request: method={request_options['method']}, url={request_options['url']}")
+
+        # Remove or comment out Arelle lock and HTTPS connection debug prints
+        # (These are likely in the agent or XBRL extraction code, not main.py, but if present, comment out lines like:)
+        # print(f"[DEBUG] Lock ...")
+        # print(f"[DEBUG] Attempting to acquire lock ...")
+        # print(f"[DEBUG] Attempting to release lock ...")
+        # print(f"[DEBUG] Starting new HTTPS connection ...")
+
+        response = requests.post(request_options['url'], headers=request_options['headers'], json=request_options['json'])
+        if response.status_code != 200:
+            raise HTTPException(status_code=500, detail=f"Failed to get a response from the LLM: {response.status_code}")
+        data = response.json()
+        summary = data['choices'][0]['message']['content']
 
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
