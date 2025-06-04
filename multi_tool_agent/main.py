@@ -19,7 +19,9 @@ app.add_middleware(
         "http://localhost:3000",  # local React dev
         "https://front2.vercel.app",  # old Vercel frontend
         "https://front2-zeta.vercel.app",  # new Vercel frontend
-        "https://filingapp.onrender.com"  # render.com backend
+        "https://filingapp.onrender.com",
+        "https://filingtalk.com",
+        "https://www.filingtalk.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -197,9 +199,9 @@ async def summarize_filing(request: SummarizeRequest):
                     tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
                     normalized_lines.append(f"{tag} {line.strip()}")
             transcript = '\n'.join(normalized_lines)
-            # Ensure 'Filing Talk' is always in English in Korean transcript
+            # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
             if request.language.startswith('ko'):
-                transcript = re.sub(r'파일링 ?토크', 'Filing Talk', transcript, flags=re.IGNORECASE)
+                transcript = re.sub(r'(Filing Talk|파일링 ?토크|필링 ?토크)', '파일링 토크', transcript, flags=re.IGNORECASE)
             print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
             tts_language = request.language
             if transcript == summary and request.language != 'en-US':
