@@ -68,41 +68,61 @@ async def summarize_filing(request: SummarizeRequest):
             xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
             # Remove or comment out verbose debug prints
             # print(f"[DEBUG] All available XBRL tags: {list(xbrl_facts.keys())}")
-            def get_latest_and_previous_value(possible_tags, pick_largest=False):
+            def get_latest_and_previous_value(possible_tags, pick_largest=False, debug_label=None):
+                all_facts = []
                 for tag in possible_tags:
                     if tag in xbrl_facts and xbrl_facts[tag]:
                         value = xbrl_facts[tag]
-                        # If it's a list of dicts with 'value', get sorted by 'period'
                         if isinstance(value, list):
                             if all(isinstance(item, dict) and 'value' in item for item in value):
-                                sorted_facts = sorted(value, key=lambda x: x.get('period') or '', reverse=True)
-                                if not sorted_facts:
-                                    return (None, None)
-                                latest = sorted_facts[0]
-                                previous = sorted_facts[1] if len(sorted_facts) > 1 else None
-                                # For revenue, pick largest for latest period if needed
-                                if pick_largest:
-                                    latest_period = latest['period']
-                                    period_values = [float(x['value']) for x in sorted_facts if x['period'] == latest_period]
-                                    latest_value = str(max(period_values))
-                                    # For previous, pick largest for previous period
-                                    if previous:
-                                        prev_period = previous['period']
-                                        prev_values = [float(x['value']) for x in sorted_facts if x['period'] == prev_period]
-                                        previous_value = str(max(prev_values))
-                                    else:
-                                        previous_value = None
-                                else:
-                                    latest_value = str(latest['value'])
-                                    previous_value = str(previous['value']) if previous else None
-                                return (latest_value, previous_value)
+                                for item in value:
+                                    period = item.get('period')
+                                    val = item.get('value')
+                                    if val is not None:
+                                        all_facts.append({'period': period, 'value': val})
                             elif all(not isinstance(item, dict) for item in value):
-                                return (value[0], value[1] if len(value) > 1 else None)
+                                for idx, val in enumerate(value):
+                                    all_facts.append({'period': None, 'value': val})
                         elif isinstance(value, dict) and 'value' in value:
-                            return (value['value'], None)
+                            all_facts.append({'period': value.get('period'), 'value': value['value']})
                         else:
-                            return (value, None)
-                return (None, None)
+                            all_facts.append({'period': None, 'value': value})
+                # Remove None values
+                all_facts = [f for f in all_facts if f['value'] is not None]
+                # Debug output for all periods/values
+                if debug_label:
+                    print(f"[XBRL DEBUG] {debug_label} - All periods/values: {all_facts}")
+                # Sort by period (descending), fallback to order if period missing
+                def sort_key(f):
+                    return f['period'] or ''
+                all_facts = sorted(all_facts, key=sort_key, reverse=True)
+                if not all_facts:
+                    return (None, None)
+                latest = all_facts[0]
+                previous = None
+                for fact in all_facts[1:]:
+                    if (fact['period'] != latest['period'] or not latest['period']) and str(fact['value']) != str(latest['value']):
+                        previous = fact
+                        break
+                # For revenue, pick largest for each period if needed
+                if pick_largest:
+                    # Group by period
+                    from collections import defaultdict
+                    period_map = defaultdict(list)
+                    for f in all_facts:
+                        period_map[f['period']].append(float(f['value']))
+                    periods_sorted = sorted(period_map.keys(), reverse=True)
+                    latest_period = periods_sorted[0]
+                    latest_value = str(max(period_map[latest_period]))
+                    previous_value = None
+                    if len(periods_sorted) > 1:
+                        prev_period = periods_sorted[1]
+                        previous_value = str(max(period_map[prev_period]))
+                    return (latest_value, previous_value)
+                else:
+                    latest_value = str(latest['value'])
+                    previous_value = str(previous['value']) if previous else None
+                    return (latest_value, previous_value)
             base_revenue_tags = [
                 'TotalRevenue',
                 'TotalRevenues',
@@ -124,9 +144,9 @@ async def summarize_filing(request: SummarizeRequest):
                 'TopLineRevenue'
             ]
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
-            revenue, revenue_prev = get_latest_and_previous_value(revenue_tags, pick_largest=True)
-            net_income, net_income_prev = get_latest_and_previous_value(['NetIncomeLoss'])
-            eps, eps_prev = get_latest_and_previous_value(['EarningsPerShareBasic'])
+            revenue, revenue_prev = get_latest_and_previous_value(revenue_tags, pick_largest=True, debug_label='Revenue')
+            net_income, net_income_prev = get_latest_and_previous_value(['NetIncomeLoss'], debug_label='Net Income')
+            eps, eps_prev = get_latest_and_previous_value(['EarningsPerShareBasic'], debug_label='EPS')
             print(f"[XBRL] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
             print(f"[XBRL] Previous values: Revenue={revenue_prev}, Net Income={net_income_prev}, EPS={eps_prev}")
             # Remove debug: Print all values for each revenue-related tag
@@ -164,12 +184,14 @@ async def summarize_filing(request: SummarizeRequest):
         # Remove the verbose extract_mda_section debug print
         # print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
 
-        def format_number_pair(label, current, previous):
+        def format_number_pair(label, current, previous, always_float=False):
             if current is None and previous is None:
                 return f"{label}: (not available)\n"
             def humanize(n):
                 try:
                     n = float(n)
+                    if always_float:
+                        return f"{n:.2f}"
                     if n >= 1_000_000_000:
                         return f"{n/1_000_000_000:.2f} billion"
                     elif n >= 1_000_000:
@@ -184,7 +206,7 @@ async def summarize_filing(request: SummarizeRequest):
         numbers_section = ""
         numbers_section += format_number_pair("Revenue", revenue, revenue_prev)
         numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
-        numbers_section += format_number_pair("EPS", eps, eps_prev)
+        numbers_section += format_number_pair("EPS", eps, eps_prev, always_float=True)
         if not (revenue or net_income or eps):
             numbers_section = "(No official numbers were found for this period.)\n"
 
@@ -194,10 +216,10 @@ async def summarize_filing(request: SummarizeRequest):
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
             "1. Financial performance: Summarize and compare the official numbers for the current and previous period (year-over-year or quarter-over-quarter as appropriate) as provided below. "
-            "EXPLAIN the main drivers behind the changes in revenue and net income (or costs) ONLY IF they are mentioned in the MDA section above. If the filing does not state a reason, do NOT speculate or make up a reason—just state the change. "
-            "2. Details and strategic drivers: Discuss what drove the numbers, management commentary, business segments, etc. from the MDA. "
+            "EXPLAIN the main drivers behind the changes in revenue and net income (or costs) ONLY IF they are mentioned in the section above. Do NOT speculate or make up a reason—just state the change. Do NOT say anything like 'the MDA does not mention...' or refer to the MDA at all. "
+            "2. Details and strategic drivers: Discuss what drove the numbers, management commentary, business segments, etc. from the section above. "
             "Highlight any specific factors, events, or trends that management attributes to the results. "
-            "3. Risks, opportunities, and outlook: Cover forward-looking statements, risk factors, and opportunities from the MDA. "
+            "3. Risks, opportunities, and outlook: Cover forward-looking statements, risk factors, and opportunities from the section above. "
             "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
@@ -208,10 +230,9 @@ async def summarize_filing(request: SummarizeRequest):
             "Begin the podcast script now.\n\n"
             "Checklist: "
             "- Did you compare the current period to the previous period for revenue and net income? "
-            "- Did you explain the main drivers of these changes, but ONLY if they are mentioned in the MDA? "
+            "- Did you explain the main drivers of these changes, but ONLY if they are mentioned in the section above? "
             "- Did you avoid speculating or making up reasons not stated in the filing? "
-            "- Did you mention if the company did not provide details? "
-            "- Did you avoid mentioning 'MDA' or 'Management's Discussion and Analysis' by name? "
+            "- Did you avoid mentioning 'MDA' or 'Management's Discussion and Analysis' by name or description? "
         )
 
         # 7. Summarize
