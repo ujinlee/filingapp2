@@ -118,10 +118,8 @@ async def summarize_filing(request: SummarizeRequest):
             eps = get_latest_value(['EarningsPerShareBasic'])
             # Print extracted XBRL numbers for debugging
             print(f"[XBRL] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
-            # Debug: Print all values for each revenue-related tag
-            for tag in revenue_tags:
-                if tag in xbrl_facts and xbrl_facts[tag]:
-                    print(f"[XBRL] Tag: {tag} | Values: {xbrl_facts[tag]}")
+            # Remove debug: Print all values for each revenue-related tag
+            # (No code here)
         except Exception as e:
             print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
@@ -211,7 +209,8 @@ async def summarize_filing(request: SummarizeRequest):
                 ]
             }
         }
-        print(f"[DEBUG] LLM request: method={request_options['method']}, url={request_options['url']}")
+        # Remove or comment out the debug print for request_options
+        # print(f"[DEBUG] LLM request: method={request_options['method']}, url={request_options['url']}")
 
         # Remove or comment out Arelle lock and HTTPS connection debug prints
         # (These are likely in the agent or XBRL extraction code, not main.py, but if present, comment out lines like:)
