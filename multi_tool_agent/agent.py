@@ -288,6 +288,14 @@ class SummarizationAgent:
 
         text_lower = text.lower()
 
+        # Debug: Print plain text around the first occurrence of 'management'
+        idx = text_lower.find('management')
+        if idx != -1:
+            start = max(0, idx - 1000)
+            end = min(len(text_lower), idx + 1000)
+            print('[DEBUG] Plain text around "management":')
+            print(text_lower[start:end])
+
         # Patterns for start and end of MDA
         start_patterns = [
             r'item\s*7[\s\S]{0,1000}?management[’\'`s ]*discussion',  # Allow up to 1000 chars (including line breaks) between
@@ -333,7 +341,7 @@ class SummarizationAgent:
         # If not found, try header tag search for 'management's discussion'
         try:
             soup = BeautifulSoup(content, 'html.parser')
-            header_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'b', 'strong', 'p', 'a', 'div', 'span', 'font'])
+            header_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'b', 'strong', 'font'])
             for tag in header_tags:
                 text = tag.get_text(separator=" ", strip=True).lower()
                 if re.search(r"management[’'`s ]*discussion", text):
