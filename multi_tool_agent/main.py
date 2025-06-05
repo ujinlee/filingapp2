@@ -216,7 +216,7 @@ async def summarize_filing(request: SummarizeRequest):
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
             "1. Financial performance: Summarize and compare the official numbers for the current and previous period (year-over-year or quarter-over-quarter as appropriate) as provided below. "
-            "THOROUGHLY review ONLY the MDA section above for relevant explanations and drivers. If the MDA section explicitly states the drivers of change (e.g., 'primarily driven by an increase in Google Services revenues…'), you must mention these drivers in the script, using similar language. "
+            "THOROUGHLY review ONLY the MDA section above for relevant explanations and drivers. For revenue, always mention the explicit drivers if stated in the MDA section. For net income changes, specifically look for and mention changes in cost of revenue, operating expenses, or other major cost items if discussed in the MDA section. "
             "If no reason is given in the MDA section, simply state the change (e.g., 'Net income increased this quarter.') and do not speculate, hedge, or mention the absence of details. "
             "Never say that revenue or any number is missing. If a number is not available, simply omit it from the script. "
             "Do NOT use phrases like 'could be attributed to', 'without specific details', or 'the filing does not specify'. "
@@ -231,12 +231,6 @@ async def summarize_filing(request: SummarizeRequest):
             f"Official numbers for the current and previous period:\n"
             f"{numbers_section}\n"
             "Begin the podcast script now.\n\n"
-            "Checklist: "
-            "- Did you thoroughly review ONLY the MDA section above for relevant explanations and drivers? "
-            "- Did you mention the explicit drivers if they are stated in the MDA section above? "
-            "- Did you avoid speculation, hedging, or mentioning the absence of details? Only state what is explicitly in the MDA section above. "
-            "- Did you avoid saying that revenue or any number is missing? "
-            "- Did you avoid mentioning 'MDA' or 'Management's Discussion and Analysis' by name or description? "
         )
 
         # 7. Summarize

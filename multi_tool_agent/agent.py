@@ -377,7 +377,10 @@ class TranslationAgent:
     _translation_cache = {}
     @staticmethod
     def translate(english_script: str, target_language: str) -> str:
+        import re
         start_time = time.time()
+        # Replace 10-Q and 10-K with 'ten Q' and 'ten K' (all languages) BEFORE translation
+        english_script = re.sub(r'10-([QK])', r'ten \1', english_script, flags=re.IGNORECASE)
         # Pre-format large numbers for local language units before translation
         def localize_large_numbers(text, lang):
             import re
@@ -757,7 +760,7 @@ class TTSAgent:
         voice_map = {
             'en': (('en-US', 'en-US-Wavenet-D', texttospeech.SsmlVoiceGender.MALE),
                    ('en-US', 'en-US-Wavenet-F', texttospeech.SsmlVoiceGender.FEMALE)),
-            'ko': (('ko-KR', 'ko-KR-Wavenet-C', texttospeech.SsmlVoiceGender.MALE),  # Try Standard-B if Wavenet-B is not male
+            'ko': (('ko-KR', 'ko-KR-Wavenet-C', texttospeech.SsmlVoiceGender.MALE),
                    ('ko-KR', 'ko-KR-Wavenet-B', texttospeech.SsmlVoiceGender.FEMALE)),
             'ja': (('ja-JP', 'ja-JP-Wavenet-B', texttospeech.SsmlVoiceGender.MALE),
                    ('ja-JP', 'ja-JP-Wavenet-A', texttospeech.SsmlVoiceGender.FEMALE)),
