@@ -308,6 +308,15 @@ class SummarizationAgent:
             r'financial statements',
         ]
 
+        # Debug: Print all matches for each start pattern
+        for pat in start_patterns:
+            matches = list(re.finditer(pat, text_lower))
+            print(f'[DEBUG] Pattern: {pat} | Matches found: {len(matches)}')
+            for m in matches:
+                start_idx = m.start()
+                snippet = text_lower[start_idx:start_idx+200]
+                print(f'[DEBUG] Match at {start_idx}: {snippet}')
+
         # Find start of MDA
         start_idx = None
         for pat in start_patterns:
