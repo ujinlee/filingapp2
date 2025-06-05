@@ -212,8 +212,7 @@ async def summarize_filing(request: SummarizeRequest):
 
         prompt = (
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
-            "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.
-            Do not refer to missing numbers. Just leave them out in the script)\n\n"
+            "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages. Do not refer to missing numbers. Just leave them out in the script)\n\n"
             f"Here is the relevant section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
             "1. Financial performance: Summarize and compare the official numbers for the current and previous period as provided below. "
