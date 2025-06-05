@@ -333,7 +333,7 @@ class SummarizationAgent:
         # If not found, try header tag search for 'management's discussion'
         try:
             soup = BeautifulSoup(content, 'html.parser')
-            header_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'b', 'strong'])
+            header_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'b', 'strong', 'p', 'a', 'div', 'span', 'font'])
             for tag in header_tags:
                 text = tag.get_text(separator=" ", strip=True).lower()
                 if re.search(r"management[’'`s ]*discussion", text):
