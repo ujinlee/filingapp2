@@ -182,6 +182,8 @@ async def summarize_filing(request: SummarizeRequest):
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
             "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL). "
+            "Compare the current period to the previous period (year-over-year or quarter-over-quarter as appropriate). "
+            "EXPLAIN the main drivers behind the changes in revenue and net income (or costs) if the company provides reasons for the changes. "
             "2. Details and strategic drivers (discuss what drove the numbers, management commentary, business segments, etc. from the MDA). "
             "3. Risks, opportunities, and outlook (cover forward-looking statements, risk factors, and opportunities from the MDA). "
             "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
