@@ -290,8 +290,8 @@ class SummarizationAgent:
 
         # Patterns for start and end of MDA
         start_patterns = [
-            r'item\s*7[\s\S]{0,2000}?management[’\'`s ]*discussion',  # Allow up to 40 chars (including line breaks) between
-            r'item\s*2[\s\S]{0,2000}?management[’\'`s ]*discussion',
+            r'item\s*7[\s\S]{0,1000}?management[’\'`s ]*discussion',  # Allow up to 1000 chars (including line breaks) between
+            r'item\s*2[\s\S]{0,1000}?management[’\'`s ]*discussion',
             r'item\s*7[.:\-\s]+',
             r'item\s*2[.:\-\s]+',
             r'item\s*(ii|two)[.:\-\s]+',  # Roman numerals or written
@@ -330,7 +330,26 @@ class SummarizationAgent:
                 print(f"[extract_mda_section] Extracted MDA section (first 500 chars): {mda_section[:500]}")
                 return mda_section
 
-        # If not found, fallback to previous logic (e.g., longest section with 'management' and 'discussion')
+        # If not found, try header tag search for 'management's discussion'
+        try:
+            soup = BeautifulSoup(content, 'html.parser')
+            header_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'b', 'strong'])
+            for tag in header_tags:
+                text = tag.get_text(separator=" ", strip=True).lower()
+                if re.search(r"management[’'`s ]*discussion", text):
+                    mda_text = ""
+                    for sibling in tag.find_next_siblings():
+                        sibling_text = sibling.get_text(separator=" ", strip=True)
+                        if re.search(r"item\s*7a|item\s*8|item\s*3|item\s*4|quantitative and qualitative disclosures|controls and procedures|financial statements", sibling_text, re.I):
+                            break
+                        mda_text += sibling_text + " "
+                    mda_text = mda_text.strip()
+                    if len(mda_text) > 200:
+                        print(f"[extract_mda_section] Extracted MDA section from header tag (first 500 chars): {mda_text[:500]}")
+                        return mda_text
+        except Exception as e:
+            print(f"[extract_mda_section] HTML header tag parsing failed: {e}")
+        # Fallback: longest section with 'management' and 'discussion'
         print("[extract_mda_section] MDA section not found using robust item logic, falling back to previous method.")
         candidates = re.findall(r'([\s\S]{0,10000})', content)
         best = ''
