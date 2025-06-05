@@ -68,17 +68,20 @@ async def summarize_filing(request: SummarizeRequest):
             xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
             # Remove or comment out verbose debug prints
             # print(f"[DEBUG] All available XBRL tags: {list(xbrl_facts.keys())}")
-            def get_latest_value(possible_tags):
+            def get_latest_value(possible_tags, pick_largest=False):
                 for tag in possible_tags:
                     if tag in xbrl_facts and xbrl_facts[tag]:
                         value = xbrl_facts[tag]
-                        # Remove or comment out verbose debug prints
-                        # print(f"[DEBUG] xbrl_facts['{tag}'] actual value: {value}")
                         # If it's a list of dicts with 'value', get the latest by 'period'
                         if isinstance(value, list):
                             if all(isinstance(item, dict) and 'value' in item for item in value):
                                 sorted_facts = sorted(value, key=lambda x: x.get('period') or '', reverse=True)
-                                return sorted_facts[0]['value']
+                                latest_period = sorted_facts[0]['period']
+                                period_values = [float(x['value']) for x in sorted_facts if x['period'] == latest_period]
+                                if pick_largest and len(period_values) > 1:
+                                    return str(max(period_values))
+                                else:
+                                    return str(period_values[0])
                             # If it's a list of values, just return the first
                             elif all(not isinstance(item, dict) for item in value):
                                 return value[0]
@@ -110,7 +113,7 @@ async def summarize_filing(request: SummarizeRequest):
                 'TopLineRevenue'
             ]
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
-            revenue = get_latest_value(revenue_tags)
+            revenue = get_latest_value(revenue_tags, pick_largest=True)
             net_income = get_latest_value(['NetIncomeLoss'])
             eps = get_latest_value(['EarningsPerShareBasic'])
             # Print extracted XBRL numbers for debugging
