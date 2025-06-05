@@ -290,8 +290,8 @@ class SummarizationAgent:
 
         # Patterns for start and end of MDA
         start_patterns = [
-            r'item\s*7[\s\S]{0,40}?management[’\'`s ]*discussion',  # Allow up to 40 chars (including line breaks) between
-            r'item\s*2[\s\S]{0,40}?management[’\'`s ]*discussion',
+            r'item\s*7[\s\S]{0,200}?management[’\'`s ]*discussion',  # Allow up to 40 chars (including line breaks) between
+            r'item\s*2[\s\S]{0,200}?management[’\'`s ]*discussion',
             r'item\s*7[.:\-\s]+',
             r'item\s*2[.:\-\s]+',
             r'item\s*(ii|two)[.:\-\s]+',  # Roman numerals or written
