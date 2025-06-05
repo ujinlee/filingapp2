@@ -90,8 +90,11 @@ async def summarize_filing(request: SummarizeRequest):
                             return value
                 return None
             base_revenue_tags = [
+                'TotalRevenue',
+                'TotalRevenues',
                 'Revenues',
                 'Revenue',
+                'TotalSales',
                 'Sales',
                 'NetSales',
                 'NetRevenue',
@@ -105,7 +108,6 @@ async def summarize_filing(request: SummarizeRequest):
                 'RevenuesNetOfInterestExpense',
                 'TotalRevenuesAndOtherIncome',
                 'TopLineRevenue',
-                'TotalRevenues',
             ]
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
             revenue = get_latest_value(revenue_tags)
