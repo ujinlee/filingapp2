@@ -230,6 +230,7 @@ async def summarize_filing(request: SummarizeRequest):
             "- Do not make up, infer, or speculate about reasons for revenue changes. Only use explanations that are explicitly stated in the text. "
             "- Focus on sections titled 'overview', 'performance', 'revenue', 'sales', or similar headings. "
             "- IMPORTANT: Do not mention 'MD&A', 'Management's Discussion and Analysis', or similar terms in the script. "
+            "- When stating whether the number increased or decreased, always check the numbers provided below and ensure your statement matches the actual change. If the numbers show an increase, do not say it decreased, and vice versa. "
             "2. Details and strategic drivers: Discuss what drove the numbers, management commentary, business segments, etc. from the section above. "
             "3. Risks, opportunities, and outlook: Cover forward-looking statements, risk factors, and opportunities from the section above. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
