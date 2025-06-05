@@ -107,14 +107,18 @@ async def summarize_filing(request: SummarizeRequest):
                 'RevenueFromContractWithCustomerMember',
                 'RevenuesNetOfInterestExpense',
                 'TotalRevenuesAndOtherIncome',
-                'TopLineRevenue',
+                'TopLineRevenue'
             ]
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
             revenue = get_latest_value(revenue_tags)
             net_income = get_latest_value(['NetIncomeLoss'])
             eps = get_latest_value(['EarningsPerShareBasic'])
-            # Remove or comment out verbose debug prints
-            # print(f"[DEBUG] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
+            # Print extracted XBRL numbers for debugging
+            print(f"[XBRL] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
+            # Debug: Print all values for each revenue-related tag
+            for tag in revenue_tags:
+                if tag in xbrl_facts and xbrl_facts[tag]:
+                    print(f"[XBRL] Tag: {tag} | Values: {xbrl_facts[tag]}")
         except Exception as e:
             print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
@@ -145,8 +149,8 @@ async def summarize_filing(request: SummarizeRequest):
         mda_section = SummarizationAgent.extract_mda_section(content, filing_summary_url, base_url)
         if mda_section is None:
             mda_section = "[MDA section not found in filing.]"
-        # print(f"[extract_mda_section] Filing content preview: {content[:100]}")
-        # print(f"[extract_mda_section] FINAL fallback preview: {fallback_section[:100]}")
+        # Remove the verbose extract_mda_section debug print
+        # print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
 
         def humanize_large_number(n):
             try:
@@ -260,6 +264,9 @@ async def summarize_filing(request: SummarizeRequest):
         except Exception as e:
             print("[ERROR] Exception in TTS synthesis:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Text-to-Speech failed: {str(e)}")
+
+        # Add a concise debug print for XBRL extraction results
+        print(f"[DEBUG] XBRL extracted: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
 
         return SummarizeResponse(
             audio_url=audio_url,
