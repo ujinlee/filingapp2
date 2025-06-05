@@ -68,30 +68,41 @@ async def summarize_filing(request: SummarizeRequest):
             xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
             # Remove or comment out verbose debug prints
             # print(f"[DEBUG] All available XBRL tags: {list(xbrl_facts.keys())}")
-            def get_latest_value(possible_tags, pick_largest=False):
+            def get_latest_and_previous_value(possible_tags, pick_largest=False):
                 for tag in possible_tags:
                     if tag in xbrl_facts and xbrl_facts[tag]:
                         value = xbrl_facts[tag]
-                        # If it's a list of dicts with 'value', get the latest by 'period'
+                        # If it's a list of dicts with 'value', get sorted by 'period'
                         if isinstance(value, list):
                             if all(isinstance(item, dict) and 'value' in item for item in value):
                                 sorted_facts = sorted(value, key=lambda x: x.get('period') or '', reverse=True)
-                                latest_period = sorted_facts[0]['period']
-                                period_values = [float(x['value']) for x in sorted_facts if x['period'] == latest_period]
-                                if pick_largest and len(period_values) > 1:
-                                    return str(max(period_values))
+                                if not sorted_facts:
+                                    return (None, None)
+                                latest = sorted_facts[0]
+                                previous = sorted_facts[1] if len(sorted_facts) > 1 else None
+                                # For revenue, pick largest for latest period if needed
+                                if pick_largest:
+                                    latest_period = latest['period']
+                                    period_values = [float(x['value']) for x in sorted_facts if x['period'] == latest_period]
+                                    latest_value = str(max(period_values))
+                                    # For previous, pick largest for previous period
+                                    if previous:
+                                        prev_period = previous['period']
+                                        prev_values = [float(x['value']) for x in sorted_facts if x['period'] == prev_period]
+                                        previous_value = str(max(prev_values))
+                                    else:
+                                        previous_value = None
                                 else:
-                                    return str(period_values[0])
-                            # If it's a list of values, just return the first
+                                    latest_value = str(latest['value'])
+                                    previous_value = str(previous['value']) if previous else None
+                                return (latest_value, previous_value)
                             elif all(not isinstance(item, dict) for item in value):
-                                return value[0]
-                        # If it's a dict with 'value'
+                                return (value[0], value[1] if len(value) > 1 else None)
                         elif isinstance(value, dict) and 'value' in value:
-                            return value['value']
-                        # If it's a single value
+                            return (value['value'], None)
                         else:
-                            return value
-                return None
+                            return (value, None)
+                return (None, None)
             base_revenue_tags = [
                 'TotalRevenue',
                 'TotalRevenues',
@@ -113,11 +124,11 @@ async def summarize_filing(request: SummarizeRequest):
                 'TopLineRevenue'
             ]
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
-            revenue = get_latest_value(revenue_tags, pick_largest=True)
-            net_income = get_latest_value(['NetIncomeLoss'])
-            eps = get_latest_value(['EarningsPerShareBasic'])
-            # Print extracted XBRL numbers for debugging
+            revenue, revenue_prev = get_latest_and_previous_value(revenue_tags, pick_largest=True)
+            net_income, net_income_prev = get_latest_and_previous_value(['NetIncomeLoss'])
+            eps, eps_prev = get_latest_and_previous_value(['EarningsPerShareBasic'])
             print(f"[XBRL] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
+            print(f"[XBRL] Previous values: Revenue={revenue_prev}, Net Income={net_income_prev}, EPS={eps_prev}")
             # Remove debug: Print all values for each revenue-related tag
             # (No code here)
         except Exception as e:
@@ -153,27 +164,28 @@ async def summarize_filing(request: SummarizeRequest):
         # Remove the verbose extract_mda_section debug print
         # print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
 
-        def humanize_large_number(n):
-            try:
-                n = float(n)
-                if n >= 1_000_000_000:
-                    return f"{n/1_000_000_000:.2f} billion"
-                elif n >= 1_000_000:
-                    return f"{n/1_000_000:.2f} million"
-                else:
-                    return str(int(n))
-            except Exception:
-                return str(n)
-
-        # 6. Build the LLM prompt with both numbers and MDA
+        def format_number_pair(label, current, previous):
+            if current is None and previous is None:
+                return f"{label}: (not available)\n"
+            def humanize(n):
+                try:
+                    n = float(n)
+                    if n >= 1_000_000_000:
+                        return f"{n/1_000_000_000:.2f} billion"
+                    elif n >= 1_000_000:
+                        return f"{n/1_000_000:.2f} million"
+                    else:
+                        return str(int(n))
+                except Exception:
+                    return str(n)
+            c = humanize(current) if current is not None else "(not available)"
+            p = humanize(previous) if previous is not None else "(not available)"
+            return f"{label}: {c} (previous period: {p})\n"
         numbers_section = ""
-        if revenue:
-            numbers_section += f"Revenue: {humanize_large_number(revenue)}\n"
-        if net_income:
-            numbers_section += f"Net Income: {humanize_large_number(net_income)}\n"
-        if eps:
-            numbers_section += f"EPS: {eps}\n"
-        if not numbers_section:
+        numbers_section += format_number_pair("Revenue", revenue, revenue_prev)
+        numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
+        numbers_section += format_number_pair("EPS", eps, eps_prev)
+        if not (revenue or net_income or eps):
             numbers_section = "(No official numbers were found for this period.)\n"
 
         prompt = (
@@ -181,19 +193,25 @@ async def summarize_filing(request: SummarizeRequest):
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
-            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL). "
-            "Compare the current period to the previous period (year-over-year or quarter-over-quarter as appropriate). "
-            "EXPLAIN the main drivers behind the changes in revenue and net income (or costs) if the company provides reasons for the changes. "
-            "2. Details and strategic drivers (discuss what drove the numbers, management commentary, business segments, etc. from the MDA). "
-            "3. Risks, opportunities, and outlook (cover forward-looking statements, risk factors, and opportunities from the MDA). "
+            "1. Financial performance: Summarize and compare the official numbers for the current and previous period (year-over-year or quarter-over-quarter as appropriate) as provided below. "
+            "EXPLAIN the main drivers behind the changes in revenue and net income (or costs) ONLY IF they are mentioned in the MDA section above. If the filing does not state a reason, do NOT speculate or make up a reason—just state the change. "
+            "2. Details and strategic drivers: Discuss what drove the numbers, management commentary, business segments, etc. from the MDA. "
+            "Highlight any specific factors, events, or trends that management attributes to the results. "
+            "3. Risks, opportunities, and outlook: Cover forward-looking statements, risk factors, and opportunities from the MDA. "
             "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
             "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
-            f"Official numbers for the period:\n"
+            f"Official numbers for the current and previous period:\n"
             f"{numbers_section}\n"
-            "Begin the podcast script now."
+            "Begin the podcast script now.\n\n"
+            "Checklist: "
+            "- Did you compare the current period to the previous period for revenue and net income? "
+            "- Did you explain the main drivers of these changes, but ONLY if they are mentioned in the MDA? "
+            "- Did you avoid speculating or making up reasons not stated in the filing? "
+            "- Did you mention if the company did not provide details? "
+            "- Did you avoid mentioning 'MDA' or 'Management's Discussion and Analysis' by name? "
         )
 
         # 7. Summarize
