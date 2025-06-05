@@ -219,7 +219,7 @@ async def summarize_filing(request: SummarizeRequest):
             "Only mention information that is explicitly stated in the section above. Clearly state the drivers of changes in revenue and net income, using only the information explicitly stated above. "
             "If the filing discusses business segments, report the changes and drivers for each segment as described. "
             "Do not mention or refer to the Management's Discussion and Analysis section, 'MDA', or any similar phrase. "
-            "Only mention the numbers extracted. If revenue ro any number is missing, DO NOT refer to it, mention it, or speculate about it. Skip it completely. "
+            "Only use the numbers extracted. If revenue or any other number is missing, DO NOT refer to it, mention it, or speculate about it. Skip it completely. "
             "2. Details and strategic drivers: Discuss what drove the numbers, management commentary, business segments, etc. from the section above. "
             "3. Risks, opportunities, and outlook: Cover forward-looking statements, risk factors, and opportunities from the section above. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
