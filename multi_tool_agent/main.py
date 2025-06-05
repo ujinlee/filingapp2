@@ -212,14 +212,15 @@ async def summarize_filing(request: SummarizeRequest):
 
         prompt = (
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
-            "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
+            "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.
+            Do not refer to missing numbers. Just leave them out in the script)\n\n"
             f"Here is the relevant section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
             "1. Financial performance: Summarize and compare the official numbers for the current and previous period as provided below. "
             "Only mention information that is explicitly stated in the section above. Clearly state the drivers of changes in revenue and net income, using only the information explicitly stated above. "
             "If the filing discusses business segments, report the changes and drivers for each segment as described. "
             "Do not mention or refer to the Management's Discussion and Analysis section, 'MDA', or any similar phrase. "
-            "Do not speculate or mention missing information. "
+            "Only mention the numbers extracted. If revenue ro any number is missing, DO NOT refer to it, mention it, or speculate about it. Skip it completely. "
             "2. Details and strategic drivers: Discuss what drove the numbers, management commentary, business segments, etc. from the section above. "
             "3. Risks, opportunities, and outlook: Cover forward-looking statements, risk factors, and opportunities from the section above. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
