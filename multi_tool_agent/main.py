@@ -203,11 +203,17 @@ async def summarize_filing(request: SummarizeRequest):
             c = humanize(current) if current is not None else "(not available)"
             p = humanize(previous) if previous is not None else "(not available)"
             return f"{label}: {c} (previous period: {p})\n"
+        def is_valid_number(val):
+            return val not in (None, [], "", "None")
+
         numbers_section = ""
-        numbers_section += format_number_pair("Revenue", revenue, revenue_prev)
-        numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
-        numbers_section += format_number_pair("EPS", eps, eps_prev, always_float=True)
-        if not (revenue or net_income or eps):
+        if is_valid_number(revenue):
+            numbers_section += format_number_pair("Revenue", revenue, revenue_prev)
+        if is_valid_number(net_income):
+            numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
+        if is_valid_number(eps):
+            numbers_section += format_number_pair("EPS", eps, eps_prev, always_float=True)
+        if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
         prompt = (
