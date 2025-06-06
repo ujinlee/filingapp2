@@ -21,8 +21,8 @@ app.add_middleware(
         "https://front2.vercel.app",  # old Vercel frontend
         "https://front2-zeta.vercel.app",  # new Vercel frontend
         "https://filingapp.onrender.com"
-        # "https://filingtalk.com",
-        # "https://www.filingtalk.com"
+        "https://filingtalk.com",
+        "https://www.filingtalk.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
