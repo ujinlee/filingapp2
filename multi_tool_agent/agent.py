@@ -300,12 +300,38 @@ class SummarizationAgent:
                         print("[extract_mda_from_filing_summary] No MDA heading found.")
                         return None
                     mda_text = ""
+                    print(f"[DEBUG] MDA header found: {mda_header.get_text(strip=True)}")
+                    print(f"[DEBUG] Number of siblings after header: {len(list(mda_header.find_next_siblings()))}")
                     for sibling in mda_header.find_next_siblings():
                         sibling_text = sibling.get_text(separator=" ", strip=True)
-                        if re.search(r"item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures", sibling_text, re.I):
+                        print(f"[DEBUG] Sibling text length: {len(sibling_text)}, First 100 chars: {sibling_text[:100]}")
+                        # Check for end markers in both the current sibling and its children
+                        end_markers = [
+                            r"item\s*7a", r"item\s*8", 
+                            r"quantitative and qualitative disclosures",
+                            r"controls and procedures",
+                            r"financial statements",
+                            r"item\s*9",
+                            r"item\s*10"
+                        ]
+                        has_end_marker = any(re.search(pat, sibling_text, re.I) for pat in end_markers)
+                        # Also check children for end markers
+                        for child in sibling.find_all():
+                            child_text = child.get_text(separator=" ", strip=True)
+                            if any(re.search(pat, child_text, re.I) for pat in end_markers):
+                                has_end_marker = True
+                                break
+                        if has_end_marker:
+                            print("[DEBUG] Found end marker, stopping extraction")
                             break
                         mda_text += sibling_text + " "
                     mda_text = mda_text.strip()
+                    print(f"[DEBUG] Total MDA section length: {len(mda_text)} characters")
+                    print(f"[DEBUG] MDA section word count: {len(mda_text.split())} words")
+                    # Verify we have substantial content
+                    if len(mda_text) < 1000:
+                        print("[DEBUG] Extracted MDA text is too short, might be incomplete")
+                        continue
                     print(f"[extract_mda_from_filing_summary] Extracted MDA narrative (first 500 chars): {mda_text[:500]}")
                     return mda_text if mda_text else None
         except Exception as e:
@@ -315,172 +341,148 @@ class SummarizationAgent:
     @staticmethod
     def extract_mda_section(content: str, filing_summary_url: str = None, base_url: str = None) -> str:
         """
-        Robustly extract the Management's Discussion and Analysis (MDA) section from the filing.
-        Focuses on extracting from 'Item 7' (or 'Item 2') to the next major item.
-        Also identifies sentences containing financial tags and numbers.
+        Extract the Management's Discussion and Analysis (MDA) section from the filing.
+        If FilingSummary.xml is available, use it for robust extraction. Otherwise, fall back to HTML/regex logic.
+        If all else fails, use a fallback: scan for the longest section containing both 'management' and 'discussion'.
         """
+        if filing_summary_url and base_url:
+            mda_text = SummarizationAgent.extract_mda_from_filing_summary(filing_summary_url, base_url)
+            if mda_text and len(mda_text) > 100:
+                return mda_text
+        # Fallback to improved HTML/regex logic
         import re
         from bs4 import BeautifulSoup
-
-        # Define patterns at the top so they are always available
-        number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
-        tag_pattern = r'(?:us-gaap:|dei:)?[A-Za-z]+(?:[A-Za-z0-9]+)?'
-
-        # Convert HTML to plain text for regex search
+        print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
         try:
             soup = BeautifulSoup(content, 'html.parser')
-            text = soup.get_text(separator=' ', strip=True)
-        except Exception:
-            text = content
-
-        text_lower = text.lower()
-
-        # Patterns for start and end of MDA
-        start_patterns = [
+            header_tags = soup.find_all(lambda tag: tag.name in ["b", "strong", "h1", "h2", "h3", "h4", "p", "a", "div", "span"])
+            min_index = int(len(header_tags) * 0.1)
+            mda_header = None
+            for i, tag in enumerate(header_tags):
+                if i < min_index:
+                    continue  # Skip TOC region
+                text = tag.get_text(separator=" ", strip=True).lower()
+                if re.search(r"management.?s discussion", text):
+                    siblings = list(tag.find_next_siblings())
+                    if any(len(s.get_text(strip=True)) > 200 for s in siblings[:3]):
+                        mda_header = tag
+                        break
+            if mda_header:
+                mda_text = ""
+                print(f"[DEBUG] MDA header found in HTML: {mda_header.get_text(strip=True)}")
+                print(f"[DEBUG] Number of siblings after header: {len(list(mda_header.find_next_siblings()))}")
+                for sibling in mda_header.find_next_siblings():
+                    sibling_text = sibling.get_text(separator=" ", strip=True)
+                    print(f"[DEBUG] Sibling text length: {len(sibling_text)}, First 100 chars: {sibling_text[:100]}")
+                    if re.search(r"item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures", sibling_text, re.I):
+                        print("[DEBUG] Found end marker, stopping extraction")
+                        break
+                    mda_text += sibling_text + " "
+                mda_text = mda_text.strip()
+                print(f"[extract_mda_section] Extracted MDA narrative (first 500 chars): {mda_text[:500]}")
+                return mda_text if mda_text else "[MDA section not found in filing.]"
+        except Exception as e:
+            print(f"[extract_mda_section] HTML parsing failed: {e}")
+        # Regex fallback (expanded with new patterns from current version)
+        mda_patterns = [
+            r"management[’'`]s discussion and analysis[\s\S]{0,100}?of financial condition and results of operations",
+            r"management[’'`]s discussion and analysis",
+            r"item\s+2[.:-]?\s*management[’'`]s discussion and analysis",
+            r"item\s+7[.:-]?\s*management[’'`]s discussion and analysis",
+            # Expanded patterns from current version
             r'item\s*7[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
             r'item\s*2[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
             r'item\s*7[\s\S]{0,1000}?management[’\'`s ]*discussion',
             r'item\s*2[\s\S]{0,1000}?management[’\'`s ]*discussion',
             r'item\s*7[.:\-\s]+',
             r'item\s*2[.:\-\s]+',
-            r'item\s*(ii|two)[.:\-\s]+',  # Roman numerals or written
+            r'item\s*(ii|two)[.:\-\s]+',
         ]
         end_patterns = [
-            r'item\s*7a[.:\-\s]+',
-            r'item\s*8[.:\-\s]+',
-            r'item\s*3[.:\-\s]+',
-            r'item\s*4[.:\-\s]+',
-            r'quantitative and qualitative disclosures',
-            r'controls and procedures',
-            r'financial statements',
+            r"item\s+3[.:-]?", r"item\s+4[.:-]?", r"quantitative and qualitative disclosures", r"controls and procedures",
+            # Expanded patterns from current version
+            r'item\s*3[.:\-]+', r'item\s*4[.:\-]+', r'item\s*7a[.:\-]+', r'item\s*8[.:\-]+',
+            r'financial statements'
         ]
-
-        # Find start of MDA
-        start_idx = None
-        for pat in start_patterns:
-            match = re.search(pat, text_lower)
+        content_lower = content.lower()
+        mda_start = None
+        for pat in mda_patterns:
+            match = re.search(pat, content_lower)
             if match:
-                start_idx = match.start()
+                mda_start = match.start()
                 break
-
-        if start_idx is not None:
-            # Find end of MDA
-            end_idx = None
+        if mda_start is not None:
+            mda_text = content[mda_start:]
+            mda_end = len(mda_text)
             for pat in end_patterns:
-                match = re.search(pat, text_lower[start_idx+1:])
+                match = re.search(pat, mda_text.lower())
                 if match:
-                    candidate_end = start_idx + 1 + match.start()
-                    if end_idx is None or candidate_end < end_idx:
-                        end_idx = candidate_end
-            if end_idx is None:
-                end_idx = len(text)
-            mda_section = text[start_idx:end_idx].strip()
-            
-            if len(mda_section) > 200:  # Only process if it's a reasonable length
-                # Split into sentences
-                sentences = re.split(r'(?<=[.!?])\s+', mda_section)
-                
-                # Find sentences with both numbers and tags
-                financial_sentences = []
-                for sentence in sentences:
-                    has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
-                    has_tags = bool(re.search(tag_pattern, sentence))
-                    
-                    if has_numbers and has_tags:
-                        numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
-                        tags = re.findall(tag_pattern, sentence)
-                        financial_sentences.append({
-                            'sentence': sentence.strip(),
-                            'numbers': numbers,
-                            'tags': tags
-                        })
-                
-                # Add financial sentences to the response
-                if financial_sentences:
-                    mda_section += "\n\n=== Financial Highlights ===\n"
-                    for fs in financial_sentences:
-                        mda_section += f"\nSentence: {fs['sentence']}\n"
-                        mda_section += f"Numbers: {', '.join(fs['numbers'])}\n"
-                        mda_section += f"Tags: {', '.join(fs['tags'])}\n"
-                
-                print(f"[extract_mda_section] Extracted MDA section with financial highlights (first 500 chars): {mda_section[:500]}")
-                return mda_section
-
-        # If not found, try header tag search for 'management's discussion'
+                    mda_end = match.start()
+                    break
+            mda_section = mda_text[:mda_end].strip()
+            print(f"[DEBUG] Regex fallback - MDA section length: {len(mda_section)} characters")
+            print(f"[DEBUG] Regex fallback - MDA section word count: {len(mda_section.split())} words")
+            print(f"[extract_mda_section] Extracted MDA section from text (first 500 chars): {mda_section[:500]}")
+            return mda_section
+        # Fallback: extract content between 'Item 7' or 'Item 2' and next major item if previous methods fail
         try:
-            soup = BeautifulSoup(content, 'html.parser')
-            header_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'b', 'strong', 'font'])
-            for tag in header_tags:
-                text = tag.get_text(separator=" ", strip=True).lower()
-                if re.search(r"management[’'`s ]*discussion", text):
-                    mda_text = ""
-                    for sibling in tag.find_next_siblings():
-                        sibling_text = sibling.get_text(separator=" ", strip=True)
-                        if re.search(r"item\s*7a|item\s*8|item\s*3|item\s*4|quantitative and qualitative disclosures|controls and procedures|financial statements", sibling_text, re.I):
-                            break
-                        mda_text += sibling_text + " "
-                    mda_text = mda_text.strip()
-                    if len(mda_text) > 200:
-                        # Process financial sentences in the extracted text
-                        sentences = re.split(r'(?<=[.!?])\s+', mda_text)
-                        financial_sentences = []
-                        for sentence in sentences:
-                            has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
-                            has_tags = bool(re.search(tag_pattern, sentence))
-                            if has_numbers and has_tags:
-                                numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
-                                tags = re.findall(tag_pattern, sentence)
-                                financial_sentences.append({
-                                    'sentence': sentence.strip(),
-                                    'numbers': numbers,
-                                    'tags': tags
-                                })
-                        
-                        if financial_sentences:
-                            mda_text += "\n\n=== Financial Highlights ===\n"
-                            for fs in financial_sentences:
-                                mda_text += f"\nSentence: {fs['sentence']}\n"
-                                mda_text += f"Numbers: {', '.join(fs['numbers'])}\n"
-                                mda_text += f"Tags: {', '.join(fs['tags'])}\n"
-                        
-                        print(f"[extract_mda_section] Extracted MDA section with financial highlights from header tag (first 500 chars): {mda_text[:500]}")
-                        return mda_text
+            text = soup.get_text(separator=' ', strip=True)
+            text_lower = text.lower()
+            # Try Item 7 first
+            mda_start = re.search(r"item\s*7[.:\-\s]+management[’'`s ]*discussion", text_lower)
+            if not mda_start:
+                mda_start = re.search(r"item\s*7[.:\-\s]+", text_lower)
+            mda_end = None
+            if mda_start:
+                start_idx = mda_start.start()
+                for pat in [r"item\s*7a[.:\-\s]+", r"item\s*8[.:\-\s]+"]:
+                    match = re.search(pat, text_lower[start_idx+1:])
+                    if match:
+                        end_idx = start_idx + 1 + match.start()
+                        if mda_end is None or end_idx < mda_end:
+                            mda_end = end_idx
+                if not mda_end:
+                    mda_end = len(text)
+                mda_section = text[start_idx:mda_end].strip()
+                if len(mda_section) > 1000:
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section length: {len(mda_section)} characters")
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section word count: {len(mda_section.split())} words")
+                    print(f"[extract_mda_section] Fallback: Extracted between Item 7 and next Item 7A/8 (first 500 chars): {mda_section[:500]}")
+                    return mda_section
+            # If Item 7 not found, try Item 2
+            mda_start = re.search(r"item\s*2[.:\-\s]+management[’'`s ]*discussion", text_lower)
+            if not mda_start:
+                mda_start = re.search(r"item\s*2[.:\-\s]+", text_lower)
+            mda_end = None
+            if mda_start:
+                start_idx = mda_start.start()
+                for pat in [r"item\s*3[.:\-\s]+", r"item\s*4[.:\-\s]+"]:
+                    match = re.search(pat, text_lower[start_idx+1:])
+                    if match:
+                        end_idx = start_idx + 1 + match.start()
+                        if mda_end is None or end_idx < mda_end:
+                            mda_end = end_idx
+                if not mda_end:
+                    mda_end = len(text)
+                mda_section = text[start_idx:mda_end].strip()
+                if len(mda_section) > 1000:
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section length: {len(mda_section)} characters")
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section word count: {len(mda_section.split())} words")
+                    print(f"[extract_mda_section] Fallback: Extracted between Item 2 and next Item 3/4 (first 500 chars): {mda_section[:500]}")
+                    return mda_section
         except Exception as e:
-            print(f"[extract_mda_section] HTML header tag parsing failed: {e}")
-
-        # Fallback: longest section with 'management' and 'discussion'
-        print("[extract_mda_section] MDA section not found using robust item logic, falling back to previous method.")
+            print(f"[extract_mda_section] Fallback Item 7/2 extraction failed: {e}")
+        # FINAL fallback: scan for the longest section containing both 'management' and 'discussion'
         candidates = re.findall(r'([\s\S]{0,10000})', content)
         best = ''
         for c in candidates:
             if 'management' in c.lower() and 'discussion' in c.lower() and len(c) > len(best):
                 best = c
         if best:
-            # Process financial sentences in the fallback text
-            sentences = re.split(r'(?<=[.!?])\s+', best)
-            financial_sentences = []
-            for sentence in sentences:
-                has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
-                has_tags = bool(re.search(tag_pattern, sentence))
-                if has_numbers and has_tags:
-                    numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
-                    tags = re.findall(tag_pattern, sentence)
-                    financial_sentences.append({
-                        'sentence': sentence.strip(),
-                        'numbers': numbers,
-                        'tags': tags
-                    })
-            
-            if financial_sentences:
-                best += "\n\n=== Financial Highlights ===\n"
-                for fs in financial_sentences:
-                    best += f"\nSentence: {fs['sentence']}\n"
-                    best += f"Numbers: {', '.join(fs['numbers'])}\n"
-                    best += f"Tags: {', '.join(fs['tags'])}\n"
-            
-            print(f"[extract_mda_section] FINAL fallback: longest section with 'management' and 'discussion' and financial highlights (first 500 chars): {best[:500]}")
+            print(f"[DEBUG] Final fallback - MDA section length: {len(best)} characters")
+            print(f"[DEBUG] Final fallback - MDA section word count: {len(best.split())} words")
+            print(f"[extract_mda_section] FINAL fallback: longest section with 'management' and 'discussion' (first 500 chars): {best[:500]}")
             return best[:10000].strip()
-        
         print("[extract_mda_section] MDA section not found in HTML or text.")
         return "[MDA section not found in filing.]"
 
