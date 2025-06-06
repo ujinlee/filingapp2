@@ -507,6 +507,8 @@ async def summarize_filing(request: SummarizeRequest):
             if request.language.startswith('ko'):
                 transcript = fix_korean_currency(transcript)
             transcript = TranslationAgent.translate(transcript, request.language)
+            # Clean transcript again after translation to remove any reintroduced names
+            transcript = clean_transcript(transcript)
             # After translation, preserve speaker tags if present, only alternate if missing
             lines = [line for line in transcript.split('\n') if line.strip()]
             normalized_lines = []
