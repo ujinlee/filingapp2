@@ -289,7 +289,8 @@ async def summarize_filing(request: SummarizeRequest):
                 'driven by', 'due to',
                 'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
             ]
-            number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
+            # Improved number pattern: matches $1,000, 10%, 5 million, 2.5B, etc.
+            number_pattern = r'(\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion|m|b|%))?)'
             soup = BeautifulSoup(mda_html, 'html.parser')
             results = []
             for table in soup.find_all('table'):
