@@ -20,7 +20,7 @@ app.add_middleware(
         "http://localhost:3000",  # local React dev
         "https://front2.vercel.app",  # old Vercel frontend
         "https://front2-zeta.vercel.app",  # new Vercel frontend
-        "https://filingapp.onrender.com"
+        "https://filingapp.onrender.com",
         "https://filingtalk.com",
         "https://www.filingtalk.com"
     ],
@@ -496,20 +496,12 @@ async def summarize_filing(request: SummarizeRequest):
         # Normalize speaker tags for the English transcript
         lines = [line for line in transcript.split('\n') if line.strip()]
         normalized_lines = []
-        last_speaker = 'ALEX:'
-        for line in lines:
-            if line.strip().startswith('ALEX:'):
-                cleaned_line = re.sub(r'^(ALEX:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
-                normalized_lines.append(cleaned_line)
-                last_speaker = 'ALEX:'
-            elif line.strip().startswith('JAMIE:'):
-                cleaned_line = re.sub(r'^(JAMIE:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
-                normalized_lines.append(cleaned_line)
-                last_speaker = 'JAMIE:'
+        for i, line in enumerate(lines):
+            if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
+                normalized_lines.append(line.strip())
             else:
-                # Alternate speaker if missing
-                last_speaker = 'JAMIE:' if last_speaker == 'ALEX:' else 'ALEX:'
-                normalized_lines.append(f"{last_speaker} {line.strip()}")
+                tag = 'ALEX:' if i % 2 == 0 else 'JAMIE:'
+                normalized_lines.append(f"{tag} {line.strip()}")
         transcript = '\n'.join(normalized_lines)
 
         if transcript:
@@ -534,14 +526,11 @@ async def summarize_filing(request: SummarizeRequest):
                 # Normalize speaker tags: ensure every line starts with a single, correct tag
                 lines = [line for line in transcript.split('\n') if line.strip()]
                 normalized_lines = []
-                for line in lines:
-                    # Only keep the first speaker tag, and alternate if missing
+                for i, line in enumerate(lines):
                     if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
-                        # Remove any additional speaker tags after the first
-                        cleaned_line = re.sub(r'^(ALEX:|JAMIE:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
-                        normalized_lines.append(cleaned_line)
+                        normalized_lines.append(line.strip())
                     else:
-                        tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
+                        tag = 'ALEX:' if i % 2 == 0 else 'JAMIE:'
                         normalized_lines.append(f"{tag} {line.strip()}")
                 transcript = '\n'.join(normalized_lines)
                 # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
