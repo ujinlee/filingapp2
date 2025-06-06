@@ -281,24 +281,16 @@ async def summarize_filing(request: SummarizeRequest):
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract up to 7 relevant sentences after the last table-like line in the MDA section for bullet 1
-        def extract_post_table_sentences(mda_text, num_sentences=7):
-            lines = mda_text.split('\n')
-            table_end_idx = -1
-            for i, line in enumerate(lines):
-                if re.search(r'\$|\d{1,3}(,\d{3})+', line):
-                    table_end_idx = i
-            post_table_text = '\n'.join(lines[table_end_idx+1:])
-            sentences = re.split(r'(?<=[.!?])\s+', post_table_text)
-            return sentences[:num_sentences]
+        # Extract relevant sentences from the entire MDA section for bullet 1
         def extract_revenue_statements(mda_text):
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+', mda_text)
             keywords = [
                 'increase', 'increased', 'decrease', 'decreased',
                 'driven by', 'due to',
                 'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
             ]
-            post_table_sentences = extract_post_table_sentences(mda_text, num_sentences=7)
-            relevant = [s for s in post_table_sentences if any(kw in s.lower() for kw in keywords)]
+            relevant = [s.strip() for s in sentences if any(kw in s.lower() for kw in keywords)]
             return ' '.join(relevant)
         revenue_statements = extract_revenue_statements(mda_section)
 
@@ -316,6 +308,7 @@ async def summarize_filing(request: SummarizeRequest):
             "- Quote or restate the main drivers exactly as stated, especially phrases like 'driven by', 'due to', 'increase', 'decrease', 'increased', or 'decreased'.\n"
             "- If a statement includes a main driver or primary reason (e.g., 'primarily driven by', 'mainly due to'), you must quote or restate that part exactly, and make it the focus of your summary.\n"
             "- Do not summarize or generalize; always use the same wording and order as in the extracted statement.\n"
+            "- Do not create new sentences based on the extracted statements. Only quote or restate the extracted sentences exactly as written. Summarize only by selecting, quoting, or restating, not by rewording or combining.\n"
             "- Do not infer, generalize, or mention anything not present in the extracted statements.\n"
             "- Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script. "
             "2. Details and strategic drivers: Summarize from the full MDA section above. "
