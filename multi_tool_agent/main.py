@@ -60,6 +60,24 @@ async def list_filings(ticker: str):
 @app.post("/api/summarize", response_model=SummarizeResponse)
 async def summarize_filing(request: SummarizeRequest):
     import traceback
+    # Move tag definitions here so they are always defined
+    base_revenue_tags = [
+        'TotalRevenue', 'TotalRevenues', 'Revenues', 'Revenue', 'TotalSales', 'Sales', 'NetSales', 'NetRevenue',
+        'NetRevenues', 'SalesRevenueNet', 'SalesRevenueNetMember', 'SalesRevenueServicesNet', 'SalesRevenueGoodsNet',
+        'RevenueFromContractWithCustomerExcludingAssessedTax', 'RevenueFromContractWithCustomerMember',
+        'RevenuesNetOfInterestExpense', 'TotalRevenuesAndOtherIncome', 'TopLineRevenue'
+    ]
+    segment_revenue_tags = [
+        'SegmentRevenue', 'SegmentRevenues', 'SegmentSales', 'SegmentNetSales', 'SegmentNetRevenue', 'SegmentNetRevenues',
+        'SegmentSalesRevenueNet', 'SegmentSalesRevenueNetMember', 'SegmentSalesRevenueServicesNet', 'SegmentSalesRevenueGoodsNet',
+        'SegmentRevenueFromContractWithCustomerExcludingAssessedTax', 'SegmentRevenueFromContractWithCustomerMember',
+        'SegmentRevenuesNetOfInterestExpense', 'SegmentTotalRevenuesAndOtherIncome', 'SegmentTopLineRevenue',
+        'EnergySegmentRevenue', 'EnergySegmentRevenues', 'EnergySegmentSales', 'TechnologySegmentRevenue',
+        'TechnologySegmentRevenues', 'TechnologySegmentSales', 'FinancialSegmentRevenue', 'FinancialSegmentRevenues',
+        'FinancialSegmentSales', 'HealthcareSegmentRevenue', 'HealthcareSegmentRevenues', 'HealthcareSegmentSales',
+        'ConsumerSegmentRevenue', 'ConsumerSegmentRevenues', 'ConsumerSegmentSales', 'IndustrialSegmentRevenue',
+        'IndustrialSegmentRevenues', 'IndustrialSegmentSales'
+    ]
     try:
         # 1. Fetch the raw HTML index page for XBRL extraction
         try:
@@ -175,26 +193,6 @@ async def summarize_filing(request: SummarizeRequest):
                             'tag': previous['tag']
                         } if previous else None
                     )
-            base_revenue_tags = [
-                'Revenues',
-                'Revenue',
-                'Sales',
-                'NetSales',
-                'NetRevenue',
-                'NetRevenues',
-                'SalesRevenueNet',
-                'SalesRevenueNetMember',
-                'SalesRevenueServicesNet',
-                'SalesRevenueGoodsNet',
-                'RevenueFromContractWithCustomerExcludingAssessedTax',
-                'RevenueFromContractWithCustomerMember',
-                'RevenuesNetOfInterestExpense',
-                'TotalRevenuesAndOtherIncome',
-                'TotalRevenues',
-                'TotalRevenue'
-
-                
-            ]
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
             revenue, previous_revenue = get_latest_and_previous_value(revenue_tags, True)
             net_income, previous_net_income = get_latest_and_previous_value(['NetIncomeLoss'])
