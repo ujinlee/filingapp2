@@ -314,7 +314,7 @@ async def summarize_filing(request: SummarizeRequest):
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
-            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL, and the extracted Financial Highlights below. The Financial Highlights are sentences from the MDA that contain both numbers and driver keywords such as increase, decrease, due to, driven by, result of, business, segment, sector, revenue, revenues, sales, etc. Explain the main drivers behind the numbers using these highlights. Do not use any other part of the MDA for this section.) "
+            "1. Financial performance: You must ONLY restate, summarize, or quote the exact sentences from the Financial Highlights below. Do NOT invent, infer, or generalize any drivers, trends, or explanations. If a driver or trend is not present in the extracted sentences, do not mention it at all.\n"
             "2. Details and strategic drivers (discuss what drove the numbers, management commentary, business segments, etc. from the MDA). "
             "3. Risks, opportunities, and outlook (cover forward-looking statements, risk factors, and opportunities from the MDA). "
             "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
@@ -324,7 +324,7 @@ async def summarize_filing(request: SummarizeRequest):
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
             f"Official numbers for the period (with prior period comparison if available):\n"
             f"{numbers_section}\n"
-            f"Financial highlights from the MDA section:\n"
+            f"Financial highlights from the MDA section (use ONLY these for section 1):\n"
             f"{financial_highlights}\n"
             "Begin the podcast script now."
         )
