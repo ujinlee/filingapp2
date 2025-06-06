@@ -512,12 +512,15 @@ async def summarize_filing(request: SummarizeRequest):
                 transcript = TranslationAgent.translate(transcript, request.language)
                 # Clean transcript again after translation to remove any reintroduced names
                 transcript = clean_transcript(transcript)
-                # After translation, preserve speaker tags if present, only alternate if missing
+                # Normalize speaker tags: ensure every line starts with a single, correct tag
                 lines = [line for line in transcript.split('\n') if line.strip()]
                 normalized_lines = []
                 for line in lines:
+                    # Only keep the first speaker tag, and alternate if missing
                     if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
-                        normalized_lines.append(line.strip())
+                        # Remove any additional speaker tags after the first
+                        cleaned_line = re.sub(r'^(ALEX:|JAMIE:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
+                        normalized_lines.append(cleaned_line)
                     else:
                         tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
                         normalized_lines.append(f"{tag} {line.strip()}")
