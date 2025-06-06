@@ -278,7 +278,7 @@ async def summarize_filing(request: SummarizeRequest):
         if is_valid_number(net_income):
             numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
         if is_valid_number(eps):
-            numbers_section += format_number_pair("EPS", eps, eps_prev, always_float=True)
+            numbers_section += format_number_pair("Earnings per Share", eps, eps_prev, always_float=True)
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
@@ -289,15 +289,18 @@ async def summarize_filing(request: SummarizeRequest):
                 'driven by', 'due to',
                 'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
             ]
-            # Improved number pattern: matches $1,000, 10%, 5 million, 2.5B, etc.
-            number_pattern = r'(\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion|m|b|%))?)'
             soup = BeautifulSoup(mda_html, 'html.parser')
             results = []
             for table in soup.find_all('table'):
                 sibling = table.next_sibling
-                text_after_table = ''
                 siblings_checked = 0
-                while sibling and siblings_checked < 3:
+                text_after_table = ''
+                while sibling and siblings_checked < 10:
+                    # Check for <p> and <li> tags within the sibling
+                    if hasattr(sibling, 'find_all'):
+                        for tag in sibling.find_all(['p', 'li']):
+                            text_after_table += ' ' + tag.get_text(separator=' ', strip=True)
+                    # Also add direct text
                     if hasattr(sibling, 'get_text'):
                         text_after_table += ' ' + sibling.get_text(separator=' ', strip=True)
                     elif isinstance(sibling, str):
@@ -309,7 +312,8 @@ async def summarize_filing(request: SummarizeRequest):
                 for s in sentences:
                     s_clean = s.strip()
                     has_keyword = any(kw in s_clean.lower() for kw in keywords)
-                    has_number = re.search(number_pattern, s_clean)
+                    has_number = re.search(r'\d', s_clean)
+                    print(f"[DEBUG] Checking: '{s_clean}' | Keyword: {has_keyword} | Number: {has_number}")
                     if has_keyword and has_number:
                         relevant.append(s_clean)
                     if len(relevant) >= num_sentences:
