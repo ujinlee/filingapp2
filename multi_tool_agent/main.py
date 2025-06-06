@@ -290,58 +290,23 @@ async def summarize_filing(request: SummarizeRequest):
                 'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
             ]
             soup = BeautifulSoup(mda_html, 'html.parser')
-            results = []
-            # 1. Try standard sentence splitting after tables
-            for table in soup.find_all('table'):
-                sibling = table.next_sibling
-                siblings_checked = 0
-                text_after_table = ''
-                while sibling and siblings_checked < 10:
-                    if hasattr(sibling, 'find_all'):
-                        for tag in sibling.find_all(['p', 'li']):
-                            text_after_table += ' ' + tag.get_text(separator=' ', strip=True)
-                    if hasattr(sibling, 'get_text'):
-                        text_after_table += ' ' + sibling.get_text(separator=' ', strip=True)
-                    elif isinstance(sibling, str):
-                        text_after_table += ' ' + sibling.strip()
-                    sibling = sibling.next_sibling
-                    siblings_checked += 1
-                print(f"[DEBUG] Text after table: {text_after_table}")
-                sentences = re.split(r'(?<=[.!?])\s+|\n+', text_after_table)
-                print(f"[DEBUG] Sentences after table: {sentences}")
-                relevant = []
-                for s in sentences:
-                    s_clean = s.strip()
-                    has_keyword = any(kw in s_clean.lower() for kw in keywords)
-                    has_number = re.search(r'\d', s_clean)
-                    print(f"[DEBUG] Checking: '{s_clean}' | Keyword: {has_keyword} | Number: {has_number}")
-                    if has_keyword and has_number:
-                        relevant.append(s_clean)
-                    if len(relevant) >= num_sentences:
-                        break
-                results.extend(relevant[:num_sentences])
-            # 2. Fallback: if nothing found after tables, search the whole MDA section for up to num_sentences
-            if not results:
-                print("[DEBUG] No relevant sentences found after tables. Using fallback: search entire MDA section.")
-                all_text = soup.get_text(separator=' ', strip=True)
-                # Try standard sentence split
-                sentences = re.split(r'(?<=[.!?])\s+|\n+', all_text)
-                fallback_relevant = []
-                for s in sentences:
-                    s_clean = s.strip()
-                    has_keyword = any(kw in s_clean.lower() for kw in keywords)
-                    has_number = re.search(r'\d', s_clean)
-                    print(f"[DEBUG][Fallback] Checking: '{s_clean}' | Keyword: {has_keyword} | Number: {has_number}")
-                    if has_keyword and has_number:
-                        fallback_relevant.append(s_clean)
-                    if len(fallback_relevant) >= num_sentences:
-                        break
-                results = fallback_relevant
-                print(f"[DEBUG][Fallback] Sentences returned: {results}")
-            # 3. If still no results, use regex-based direct extraction (improved for multiple keywords/numbers)
+            all_text = soup.get_text(separator=' ', strip=True)
+            # Always extract from the entire MDA section
+            sentences = re.split(r'(?<=[.!?])\s+|\n+', all_text)
+            relevant = []
+            for s in sentences:
+                s_clean = s.strip()
+                has_keyword = any(kw in s_clean.lower() for kw in keywords)
+                has_number = re.search(r'\d', s_clean)
+                print(f"[DEBUG][All MDA] Checking: '{s_clean}' | Keyword: {has_keyword} | Number: {has_number}")
+                if has_keyword and has_number:
+                    relevant.append(s_clean)
+                if len(relevant) >= num_sentences:
+                    break
+            # If not enough, fallback to regex and sliding window as before
+            results = relevant
             if not results:
                 print("[DEBUG][Regex Fallback] No results from sentence split, trying regex chunk extraction.")
-                # Loosened pattern: match any chunk with a keyword and a number, in any order, and allow for commas, $ etc.
                 pattern = r'([^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*?\d+[^.!?\n]*[.!?]|[^.!?\n]*?\d+[^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*[.!?])'
                 matches = re.findall(pattern, all_text, re.IGNORECASE)
                 regex_chunks = []
@@ -352,7 +317,6 @@ async def summarize_filing(request: SummarizeRequest):
                         regex_chunks.append(chunk)
                 print(f"[DEBUG][Regex Fallback] Regex-matched chunks: {regex_chunks}")
                 results = regex_chunks[:num_sentences]
-            # 4. If still no results, use sliding window
             if not results:
                 print("[DEBUG][Sliding Window Fallback] No results from regex, trying sliding window.")
                 words = all_text.split()
@@ -367,7 +331,7 @@ async def summarize_filing(request: SummarizeRequest):
                         break
                 print(f"[DEBUG][Sliding Window Fallback] Chunks: {results}")
             else:
-                print(f"[DEBUG] Sentences returned from tables or fallback: {results}")
+                print(f"[DEBUG][All MDA] Sentences returned: {results}")
             return results
 
         def extract_revenue_statements(mda_html):
@@ -376,6 +340,16 @@ async def summarize_filing(request: SummarizeRequest):
             return ' '.join(post_table_sentences)
 
         revenue_statements = extract_revenue_statements(mda_section)
+
+        # Remove any mention of MDA, MD&A, or Management's Discussion and Analysis from the script
+        def remove_mda_mentions(text):
+            patterns = [
+                r'MD&A', r'MDA', r'Management\'?s? Discussion and Analysis',
+                r'md&a', r'mda', r'management\'?s? discussion and analysis'
+            ]
+            for pat in patterns:
+                text = re.sub(pat, '', text, flags=re.IGNORECASE)
+            return text
 
         prompt = (
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
@@ -386,21 +360,15 @@ async def summarize_filing(request: SummarizeRequest):
             "- Do NOT paraphrase, mix, combine, or create new sentences.\n"
             "- Do NOT use partial sentences.\n"
             "- Do NOT infer or add information.\n"
-            "- Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script.\n"
             f"{revenue_statements}\n\n"
-            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below.\n"
+            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full section below.\n"
             f"{mda_section}\n\n"
             "Create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
             "1. Financial performance: Summarize revenue changes and their explicit explanations using ONLY the extracted statements above.\n"
-            "2. Details and strategic drivers: Summarize from the full MDA section above.\n"
-            "3. Risks, opportunities, and outlook: Summarize from the full MDA section above.\n"
-            "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX.\n"
-            "Do not use any other speaker names or formats.\n"
-            "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
-            f"Official numbers for the current and previous period:\n"
-            f"{numbers_section}\n"
-            "Begin the podcast script now.\n\n"
+            "2. Details and strategic drivers: Summarize from the full section above.\n"
+            "3. Risks, opportunities, and outlook: Summarize from the full section above.\n"
         )
+        prompt = remove_mda_mentions(prompt)
 
         # 7. Summarize
         request_options = {
