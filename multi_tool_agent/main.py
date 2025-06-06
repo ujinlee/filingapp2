@@ -451,7 +451,18 @@ async def summarize_filing(request: SummarizeRequest):
             return transcript
         # ...
         # After you get the LLM output (e.g., 'transcript = ...')
-        transcript = clean_transcript(transcript)
+        transcript = ""
+        try:
+            # ... LLM call that sets transcript ...
+            transcript = summary  # or whatever variable holds the LLM output
+        except Exception as e:
+            print(f"[ERROR] LLM call failed: {e}")
+            transcript = ""
+
+        if transcript:
+            transcript = clean_transcript(transcript)
+        else:
+            print("[WARN] Transcript is empty after LLM call.")
 
         # Remove stage directions like [Intro Music] before translation and TTS
         def remove_stage_directions(transcript):
