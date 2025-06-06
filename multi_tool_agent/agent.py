@@ -335,30 +335,29 @@ class SummarizationAgent:
 
         text_lower = text.lower()
 
-        # Patterns for start and end of MDA
+        # Print the first 1000 characters for debugging
+        print("[DEBUG] First 1000 chars of text_lower:", text_lower[:1000])
+
+        # Patterns for start and end of MDA (more robust for quotes and variations)
         start_patterns = [
-            r'item\s*7[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
-            r'item\s*2[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
-            r'item\s*7[\s\S]{0,1000}?management[’\'`s ]*discussion',
-            r'item\s*2[\s\S]{0,1000}?management[’\'`s ]*discussion',
+            r'item\s*7[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*2[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*7[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*2[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
             r'item\s*7[.:\-\s]+',
             r'item\s*2[.:\-\s]+',
-            r'item\s*(ii|two)[.:\-\s]+',  # Roman numerals or written
+            r'item\s*(ii|two)[.:\-\s]+',
         ]
         end_patterns = [
-            r'item\s*7a[.:\-\s]+',
-            r'item\s*8[.:\-\s]+',
-            r'item\s*3[.:\-\s]+',
-            r'item\s*4[.:\-\s]+',
-            r'quantitative and qualitative disclosures',
-            r'controls and procedures',
-            r'financial statements',
+            r'item\s*3[.:\-]+', r'item\s*4[.:\-]+', r'item\s*7a[.:\-]+', r'item\s*8[.:\-]+',
+            r'quantitative and qualitative disclosures', r'controls and procedures', r'financial statements'
         ]
 
         # Find start of MDA
         start_idx = None
         for pat in start_patterns:
             match = re.search(pat, text_lower)
+            print(f"[DEBUG] Trying start pattern: {pat} | Match: {match}")
             if match:
                 start_idx = match.start()
                 break
@@ -368,6 +367,7 @@ class SummarizationAgent:
             end_idx = None
             for pat in end_patterns:
                 match = re.search(pat, text_lower[start_idx+1:])
+                print(f"[DEBUG] Trying end pattern: {pat} | Match: {match}")
                 if match:
                     candidate_end = start_idx + 1 + match.start()
                     if end_idx is None or candidate_end < end_idx:
@@ -448,39 +448,41 @@ class SummarizationAgent:
         except Exception as e:
             print(f"[extract_mda_section] HTML header tag parsing failed: {e}")
 
-        # Fallback: longest section with 'management' and 'discussion'
-        print("[extract_mda_section] MDA section not found using robust item logic, falling back to previous method.")
-        candidates = re.findall(r'([\s\S]{0,10000})', content)
-        best = ''
-        for c in candidates:
-            if 'management' in c.lower() and 'discussion' in c.lower() and len(c) > len(best):
-                best = c
-        if best:
-            # Process financial sentences in the fallback text
-            sentences = re.split(r'(?<=[.!?])\s+', best)
-            financial_sentences = []
-            for sentence in sentences:
-                has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
-                has_tags = bool(re.search(tag_pattern, sentence))
-                if has_numbers and has_tags:
-                    numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
-                    tags = re.findall(tag_pattern, sentence)
-                    financial_sentences.append({
-                        'sentence': sentence.strip(),
-                        'numbers': numbers,
-                        'tags': tags
-                    })
-            
-            if financial_sentences:
-                best += "\n\n=== Financial Highlights ===\n"
-                for fs in financial_sentences:
-                    best += f"\nSentence: {fs['sentence']}\n"
-                    best += f"Numbers: {', '.join(fs['numbers'])}\n"
-                    best += f"Tags: {', '.join(fs['tags'])}\n"
-            
-            print(f"[extract_mda_section] FINAL fallback: longest section with 'management' and 'discussion' and financial highlights (first 500 chars): {best[:500]}")
-            return best[:10000].strip()
-        
+        # Regex fallback
+        mda_patterns = [
+            r'item\s*7[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*2[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*7[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*2[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*7[.:\-\s]+',
+            r'item\s*2[.:\-\s]+',
+            r'item\s*(ii|two)[.:\-\s]+',
+        ]
+        end_patterns = [
+            r'item\s*3[.:\-]+', r'item\s*4[.:\-]+', r'item\s*7a[.:\-]+', r'item\s*8[.:\-]+',
+            r'quantitative and qualitative disclosures', r'controls and procedures', r'financial statements'
+        ]
+        content_lower = content.lower()
+        mda_start = None
+        for pat in mda_patterns:
+            match = re.search(pat, content_lower)
+            print(f"[DEBUG][Fallback] Trying start pattern: {pat} | Match: {match}")
+            if match:
+                mda_start = match.start()
+                break
+        if mda_start is not None:
+            mda_text = content[mda_start:]
+            mda_end = len(mda_text)
+            for pat in end_patterns:
+                match = re.search(pat, mda_text.lower())
+                print(f"[DEBUG][Fallback] Trying end pattern: {pat} | Match: {match}")
+                if match:
+                    mda_end = match.start()
+                    break
+            mda_section = mda_text[:mda_end].strip()
+            print(f"[extract_mda_section] Extracted MDA section from text (first 500 chars): {mda_section[:500]}")
+            return mda_section
+
         print("[extract_mda_section] MDA section not found in HTML or text.")
         return "[MDA section not found in filing.]"
 
