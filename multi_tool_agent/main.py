@@ -450,8 +450,28 @@ async def summarize_filing(request: SummarizeRequest):
             transcript = re.sub(r'^(ALEX:)\s*Alex:\s*', r'\1 ', transcript, flags=re.MULTILINE)
             transcript = re.sub(r'^(JAMIE:)\s*Jamie:\s*', r'\1 ', transcript, flags=re.MULTILINE)
             # Remove self-introductions at the start of the line after the speaker tag
-            transcript = re.sub(r'^(ALEX:)\s*(Hey, everyone, )?(this is|I am|I'm|I\'m)?\s*Alex[,.!\s-]*', r'\1 ', transcript, flags=re.MULTILINE | re.IGNORECASE)
-            transcript = re.sub(r'^(JAMIE:)\s*(Hey, everyone, )?(this is|I am|I'm|I\'m)?\s*Jamie[,.!\s-]*', r'\1 ', transcript, flags=re.MULTILINE | re.IGNORECASE)
+            pattern_alex = (
+                r"^(ALEX:)\s*"
+                r"(Hey, everyone, )?"
+                r"(this is|I am|I'm)?\s*Alex[,.!\s-]*"
+            )
+            transcript = re.sub(
+                pattern_alex,
+                r"\1 ",
+                transcript,
+                flags=re.MULTILINE | re.IGNORECASE
+            )
+            pattern_jamie = (
+                r"^(JAMIE:)\s*"
+                r"(Hey, everyone, )?"
+                r"(this is|I am|I'm)?\s*Jamie[,.!\s-]*"
+            )
+            transcript = re.sub(
+                pattern_jamie,
+                r"\1 ",
+                transcript,
+                flags=re.MULTILINE | re.IGNORECASE
+            )
             # Remove 'joined today by Jamie' or 'joined by Alex' at the start
             transcript = re.sub(r'^(ALEX:).*joined (today )?by Jamie[,.!\s-]*', r'\1 ', transcript, flags=re.MULTILINE | re.IGNORECASE)
             transcript = re.sub(r'^(JAMIE:).*joined (today )?by Alex[,.!\s-]*', r'\1 ', transcript, flags=re.MULTILINE | re.IGNORECASE)
