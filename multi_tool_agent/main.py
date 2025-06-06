@@ -493,6 +493,18 @@ async def summarize_filing(request: SummarizeRequest):
         # Clean the English transcript before any further processing or display
         transcript = clean_transcript(transcript)
 
+        # Normalize speaker tags for the English transcript
+        lines = [line for line in transcript.split('\n') if line.strip()]
+        normalized_lines = []
+        for line in lines:
+            if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
+                cleaned_line = re.sub(r'^(ALEX:|JAMIE:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
+                normalized_lines.append(cleaned_line)
+            else:
+                tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
+                normalized_lines.append(f"{tag} {line.strip()}")
+        transcript = '\n'.join(normalized_lines)
+
         if transcript:
             # Remove stage directions like [Intro Music] before translation and TTS
             def remove_stage_directions(transcript):
