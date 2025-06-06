@@ -242,20 +242,34 @@ async def summarize_filing(request: SummarizeRequest):
         # Remove the verbose extract_mda_section debug print
         # print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
 
-        # After extracting mda_section
+        # Improved MDA fallback extraction
         if not mda_section or len(mda_section) < 500 or mda_section == "[MDA section not found in filing.]" or re.match(r'^item \d+management', mda_section.strip().lower()):
-            print("[DEBUG] MDA extraction too short or only header, using final fallback.")
-            candidates = re.findall(r'([\s\S]{0,10000})', content)
-            best = ''
-            for c in candidates:
-                if 'management' in c.lower() and 'discussion' in c.lower() and len(c) > len(best):
-                    best = c
-            if best and len(best) > 500:
-                print(f"[DEBUG] Final fallback - MDA section length: {len(best)} characters")
-                mda_section = best[:10000].strip()
+            print("[DEBUG] MDA extraction too short or only header, using improved fallback.")
+            # Try to extract between Item 2 and Item 3 (or Item 7 and Item 7A/8)
+            mda_match = re.search(r'(item\s*2[\s\S]+?)(item\s*3|item\s*4|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
+            if not mda_match:
+                mda_match = re.search(r'(item\s*7[\s\S]+?)(item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
+            if mda_match:
+                mda_section = mda_match.group(1).strip()
+                print(f"[DEBUG] Regex section fallback - MDA section length: {len(mda_section)} characters")
             else:
-                print("[DEBUG] All MDA extraction failed, using entire filing text.")
-                mda_section = content[:10000].strip()
+                print("[DEBUG] Regex section fallback failed, using alpha-ratio filter fallback.")
+                candidates = re.findall(r'([\s\S]{0,10000})', content)
+                best = ''
+                best_alpha = 0
+                for c in candidates:
+                    if 'management' in c.lower() and 'discussion' in c.lower():
+                        alpha_ratio = sum(ch.isalpha() for ch in c) / max(1, len(c))
+                        print(f"[DEBUG] Candidate section alpha ratio: {alpha_ratio:.2f}, length: {len(c)}")
+                        if alpha_ratio > 0.5 and len(c) > len(best):
+                            best = c
+                            best_alpha = alpha_ratio
+                if best and len(best) > 500:
+                    print(f"[DEBUG] Alpha-ratio fallback - MDA section length: {len(best)} characters, alpha ratio: {best_alpha:.2f}")
+                    mda_section = best[:10000].strip()
+                else:
+                    print("[DEBUG] All MDA extraction failed, using entire filing text.")
+                    mda_section = content[:10000].strip()
 
         def format_number_pair(label, current, previous, always_float=False):
             if current is None and previous is None:
