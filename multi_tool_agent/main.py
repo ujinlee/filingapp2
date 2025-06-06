@@ -352,7 +352,12 @@ async def summarize_filing(request: SummarizeRequest):
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
         # Remove any mention of MDA, MD&A, Management's Discussion, etc.
-        summary = re.sub(r'(MDA|MD&A|Management[’'`s ]*Discussion[^.,;:]*)( section| says| states| reports| notes| indicates| reveals| highlights)?', 'the filing', summary, flags=re.IGNORECASE)
+        summary = re.sub(
+            r"""(MDA|MD&A|Management[’'`s ]*Discussion[^.,;:]*)(?: section| says| states| reports| notes| indicates| reveals| highlights)?""",
+            'the filing',
+            summary,
+            flags=re.IGNORECASE
+        )
 
         # 8. Translate
         try:
