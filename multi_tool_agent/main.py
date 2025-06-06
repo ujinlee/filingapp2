@@ -43,6 +43,12 @@ class SummarizeResponse(BaseModel):
     audio_url: str
     transcript: str
     summary: str
+    financial_data: dict = {
+        'revenue': None,
+        'net_income': None,
+        'eps': None,
+        'segment_revenues': {}
+    }
 
 @app.get("/api/filings")
 async def list_filings(ticker: str):
@@ -78,15 +84,36 @@ async def summarize_filing(request: SummarizeRequest):
                                 for item in value:
                                     period = item.get('period')
                                     val = item.get('value')
+                                    context = item.get('context', {})
                                     if val is not None:
-                                        all_facts.append({'period': period, 'value': val})
+                                        all_facts.append({
+                                            'period': period,
+                                            'value': val,
+                                            'context': context,
+                                            'tag': tag
+                                        })
                             elif all(not isinstance(item, dict) for item in value):
                                 for idx, val in enumerate(value):
-                                    all_facts.append({'period': None, 'value': val})
+                                    all_facts.append({
+                                        'period': None,
+                                        'value': val,
+                                        'context': {},
+                                        'tag': tag
+                                    })
                         elif isinstance(value, dict) and 'value' in value:
-                            all_facts.append({'period': value.get('period'), 'value': value['value']})
+                            all_facts.append({
+                                'period': value.get('period'),
+                                'value': value['value'],
+                                'context': value.get('context', {}),
+                                'tag': tag
+                            })
                         else:
-                            all_facts.append({'period': None, 'value': value})
+                            all_facts.append({
+                                'period': None,
+                                'value': value,
+                                'context': {},
+                                'tag': tag
+                            })
                 # Remove None values
                 all_facts = [f for f in all_facts if f['value'] is not None]
                 # Debug output for all periods/values
@@ -110,25 +137,47 @@ async def summarize_filing(request: SummarizeRequest):
                     from collections import defaultdict
                     period_map = defaultdict(list)
                     for f in all_facts:
-                        period_map[f['period']].append(float(f['value']))
+                        period_map[f['period']].append((float(f['value']), f))
                     periods_sorted = sorted(period_map.keys(), reverse=True)
                     latest_period = periods_sorted[0]
-                    latest_value = str(max(period_map[latest_period]))
+                    latest_value, latest_fact = max(period_map[latest_period], key=lambda x: x[0])
                     previous_value = None
+                    previous_fact = None
                     if len(periods_sorted) > 1:
                         prev_period = periods_sorted[1]
-                        previous_value = str(max(period_map[prev_period]))
-                    return (latest_value, previous_value)
+                        previous_value, previous_fact = max(period_map[prev_period], key=lambda x: x[0])
+                    return (
+                        {
+                            'value': str(latest_value),
+                            'period': latest_period,
+                            'context': latest_fact['context'],
+                            'tag': latest_fact['tag']
+                        },
+                        {
+                            'value': str(previous_value),
+                            'period': prev_period if previous_value else None,
+                            'context': previous_fact['context'] if previous_fact else {},
+                            'tag': previous_fact['tag'] if previous_fact else None
+                        } if previous_value else None
+                    )
                 else:
-                    latest_value = str(latest['value'])
-                    previous_value = str(previous['value']) if previous else None
-                    return (latest_value, previous_value)
+                    return (
+                        {
+                            'value': str(latest['value']),
+                            'period': latest['period'],
+                            'context': latest['context'],
+                            'tag': latest['tag']
+                        },
+                        {
+                            'value': str(previous['value']),
+                            'period': previous['period'],
+                            'context': previous['context'],
+                            'tag': previous['tag']
+                        } if previous else None
+                    )
             base_revenue_tags = [
-                'TotalRevenue',
-                'TotalRevenues',
                 'Revenues',
                 'Revenue',
-                'TotalSales',
                 'Sales',
                 'NetSales',
                 'NetRevenue',
@@ -141,58 +190,21 @@ async def summarize_filing(request: SummarizeRequest):
                 'RevenueFromContractWithCustomerMember',
                 'RevenuesNetOfInterestExpense',
                 'TotalRevenuesAndOtherIncome',
-                'TopLineRevenue'
+                'TotalRevenues',
+                'TotalRevenue'
+
+                
             ]
-            
-            # Add segment revenue tags
-            segment_revenue_tags = [
-                'SegmentRevenue',
-                'SegmentRevenues',
-                'SegmentSales',
-                'SegmentNetSales',
-                'SegmentNetRevenue',
-                'SegmentNetRevenues',
-                'SegmentSalesRevenueNet',
-                'SegmentSalesRevenueNetMember',
-                'SegmentSalesRevenueServicesNet',
-                'SegmentSalesRevenueGoodsNet',
-                'SegmentRevenueFromContractWithCustomerExcludingAssessedTax',
-                'SegmentRevenueFromContractWithCustomerMember',
-                'SegmentRevenuesNetOfInterestExpense',
-                'SegmentTotalRevenuesAndOtherIncome',
-                'SegmentTopLineRevenue',
-                # Common segment names
-                'EnergySegmentRevenue',
-                'EnergySegmentRevenues',
-                'EnergySegmentSales',
-                'TechnologySegmentRevenue',
-                'TechnologySegmentRevenues',
-                'TechnologySegmentSales',
-                'FinancialSegmentRevenue',
-                'FinancialSegmentRevenues',
-                'FinancialSegmentSales',
-                'HealthcareSegmentRevenue',
-                'HealthcareSegmentRevenues',
-                'HealthcareSegmentSales',
-                'ConsumerSegmentRevenue',
-                'ConsumerSegmentRevenues',
-                'ConsumerSegmentSales',
-                'IndustrialSegmentRevenue',
-                'IndustrialSegmentRevenues',
-                'IndustrialSegmentSales'
-            ]
-            
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
-            segment_revenue_tags = segment_revenue_tags + [f'us-gaap:{tag}' for tag in segment_revenue_tags]
-            
-            # Get total revenue
-            revenue, revenue_prev = get_latest_and_previous_value(revenue_tags, pick_largest=True, debug_label='Revenue')
+            revenue, previous_revenue = get_latest_and_previous_value(revenue_tags, True)
+            net_income, previous_net_income = get_latest_and_previous_value(['NetIncomeLoss'])
+            eps, previous_eps = get_latest_and_previous_value(['EarningsPerShareBasic'])
             
             # Get segment revenues
             segment_revenues = {}
             for tag in segment_revenue_tags:
                 if tag in xbrl_facts and xbrl_facts[tag]:
-                    current, previous = get_latest_and_previous_value([tag], debug_label=f'Segment Revenue - {tag}')
+                    current, previous = get_latest_and_previous_value([tag])
                     if current is not None:
                         segment_name = tag.replace('SegmentRevenue', '').replace('SegmentRevenues', '').replace('SegmentSales', '')
                         if not segment_name:
@@ -202,12 +214,24 @@ async def summarize_filing(request: SummarizeRequest):
                             'previous': previous
                         }
             
-            net_income, net_income_prev = get_latest_and_previous_value(['NetIncomeLoss'], debug_label='Net Income')
-            eps, eps_prev = get_latest_and_previous_value(['EarningsPerShareBasic'], debug_label='EPS')
+            financial_data = {
+                'revenue': {
+                    'current': revenue,
+                    'previous': previous_revenue
+                },
+                'net_income': {
+                    'current': net_income,
+                    'previous': previous_net_income
+                },
+                'eps': {
+                    'current': eps,
+                    'previous': previous_eps
+                },
+                'segment_revenues': segment_revenues
+            }
             
-            print(f"[XBRL] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
-            print(f"[XBRL] Previous values: Revenue={revenue_prev}, Net Income={net_income_prev}, EPS={eps_prev}")
-            print(f"[XBRL] Segment revenues: {segment_revenues}")
+            # Print extracted XBRL numbers for debugging
+            print(f"[XBRL] Extracted financial data: {financial_data}")
         except Exception as e:
             print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
@@ -241,84 +265,55 @@ async def summarize_filing(request: SummarizeRequest):
         # Remove the verbose extract_mda_section debug print
         # print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
 
-        def format_number_pair(label, current, previous, always_float=False):
-            if current is None and previous is None:
-                return f"{label}: (not available)\n"
-            def humanize(n):
-                try:
-                    n = float(n)
-                    if always_float:
-                        return f"{n:.2f}"
-                    if n >= 1_000_000_000:
-                        return f"{n/1_000_000_000:.2f} billion"
-                    elif n >= 1_000_000:
-                        return f"{n/1_000_000:.2f} million"
-                    else:
-                        return str(int(n))
-                except Exception:
-                    return str(n)
-            c = humanize(current) if current is not None else "(not available)"
-            p = humanize(previous) if previous is not None else "(not available)"
-            return f"{label}: {c} (previous period: {p})\n"
-        def is_valid_number(val):
-            return val not in (None, [], "", "None")
+        def humanize_large_number(n):
+            try:
+                n = float(n)
+                if n >= 1_000_000_000:
+                    return f"{n/1_000_000_000:.2f} billion"
+                elif n >= 1_000_000:
+                    return f"{n/1_000_000:.2f} million"
+                else:
+                    return str(int(n))
+            except Exception:
+                return str(n)
 
+        # 6. Build the LLM prompt with both numbers and MDA
         numbers_section = ""
-        if is_valid_number(revenue):
-            numbers_section += format_number_pair("Revenue", revenue, revenue_prev)
-            
-        # Add segment revenues to numbers section
-        if segment_revenues:
-            numbers_section += "\nSegment Revenues:\n"
-            for segment, values in segment_revenues.items():
-                if is_valid_number(values['current']):
-                    numbers_section += format_number_pair(f"{segment} Revenue", values['current'], values['previous'])
-            
-        if is_valid_number(net_income):
-            numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
-        if is_valid_number(eps):
-            numbers_section += format_number_pair("EPS", eps, eps_prev, always_float=True)
+        if revenue:
+            numbers_section += f"Revenue: {humanize_large_number(revenue)}\n"
+        if net_income:
+            numbers_section += f"Net Income: {humanize_large_number(net_income)}\n"
+        if eps:
+            numbers_section += f"EPS: {eps}\n"
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract relevant sentences from the entire MDA section for bullet 1
-        def extract_revenue_statements(mda_text):
-            import re
-            sentences = re.split(r'(?<=[.!?])\s+', mda_text)
-            keywords = [
-                'increase', 'increased', 'decrease', 'decreased',
-                'driven by', 'due to',
-                'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
-            ]
-            relevant = [s.strip() for s in sentences if any(kw in s.lower() for kw in keywords)]
-            return ' '.join(relevant)
-        revenue_statements = extract_revenue_statements(mda_section)
+        # Extract financial highlights from MDA if present
+        financial_highlights = ""
+        if "=== Financial Highlights ===" in mda_section:
+            highlights_start = mda_section.find("=== Financial Highlights ===")
+            financial_highlights = mda_section[highlights_start:]
+            # Remove the highlights from the main MDA section to avoid duplication
+            mda_section = mda_section[:highlights_start].strip()
 
         prompt = (
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
-            "For this script, use the following:\n"
-            "1. For the Financial performance section, ONLY use the statements below that contain increase, increased, decrease, decreased, driven by, due to, revenue, revenues, sales, business, sector, or segment:\n"
-            f"{revenue_statements}\n\n"
-            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below:\n"
-            f"{mda_section}\n\n"
-            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
-            "1. Financial performance: Summarize revenue changes and their explicit explanations using ONLY the extracted statements above.\n"
-            "- If a sentence contains both the numbers and the direction (increase/decrease) and the main driver (e.g., 'primarily driven by'), quote the entire sentence exactly as written. Do not paraphrase, summarize, or create a new sentence. Only use the exact sentence from the extracted statements.\n"
-            "- Quote or restate the main drivers exactly as stated, especially phrases like 'driven by', 'due to', 'increase', 'decrease', 'increased', or 'decreased'.\n"
-            "- If a statement includes a main driver or primary reason (e.g., 'primarily driven by', 'mainly due to'), you must quote or restate that part exactly, and make it the focus of your summary.\n"
-            "- Do not summarize or generalize; always use the same wording and order as in the extracted statement.\n"
-            "- Do not create new sentences based on the extracted statements. Only quote or restate the extracted sentences exactly as written. Summarize only by selecting, quoting, or restating, not by rewording or combining.\n"
-            "- Do not infer, generalize, or mention anything not present in the extracted statements.\n"
-            "- Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script. "
-            "2. Details and strategic drivers: Summarize from the full MDA section above. "
-            "3. Risks, opportunities, and outlook: Summarize from the full MDA section above. "
-            "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
-            "Do not use any other speaker names or formats. "
+            f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
+            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
+            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL). "
+            "2. Details and strategic drivers (discuss what drove the numbers, management commentary, business segments, etc. from the MDA). "
+            "3. Risks, opportunities, and outlook (cover forward-looking statements, risk factors, and opportunities from the MDA). "
+            "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
+            "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
+            "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
+            "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
-            f"Official numbers for the current and previous period:\n"
+            f"Official numbers for the period:\n"
             f"{numbers_section}\n"
-            "Begin the podcast script now.\n\n"
+            f"Financial highlights from the MDA section:\n"
+            f"{financial_highlights}\n"
+            "Begin the podcast script now."
         )
 
         # 7. Summarize
@@ -336,8 +331,7 @@ async def summarize_filing(request: SummarizeRequest):
                 ]
             }
         }
-        # Remove or comment out the debug print for request_options
-        # print(f"[DEBUG] LLM request: method={request_options['method']}, url={request_options['url']}")
+        print(f"[DEBUG] LLM request: method={request_options['method']}, url={request_options['url']}")
 
         # Remove or comment out Arelle lock and HTTPS connection debug prints
         # (These are likely in the agent or XBRL extraction code, not main.py, but if present, comment out lines like:)
@@ -400,7 +394,8 @@ async def summarize_filing(request: SummarizeRequest):
         return SummarizeResponse(
             audio_url=audio_url,
             transcript=transcript,
-            summary=summary
+            summary=summary,
+            financial_data=financial_data
         )
     except HTTPException as e:
         print("[ERROR] HTTPException in summarize_filing:", traceback.format_exc())

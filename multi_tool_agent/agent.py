@@ -199,14 +199,56 @@ class SECAgent:
 
 class SummarizationAgent:
     @staticmethod
+    def extract_financial_sentences(content: str) -> list:
+        """
+        Extract sentences containing financial numbers and tags from the MDA section.
+        Returns a list of dictionaries containing the sentence and its context.
+        """
+        # Split content into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', content)
+        
+        # Patterns to match financial numbers and tags
+        number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
+        tag_pattern = r'(?:us-gaap:|dei:)?[A-Za-z]+(?:[A-Za-z0-9]+)?'
+        
+        financial_sentences = []
+        
+        for sentence in sentences:
+            # Check if sentence contains both numbers and tags
+            has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
+            has_tags = bool(re.search(tag_pattern, sentence))
+            
+            if has_numbers and has_tags:
+                # Extract the numbers and tags for context
+                numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
+                tags = re.findall(tag_pattern, sentence)
+                
+                financial_sentences.append({
+                    'sentence': sentence.strip(),
+                    'numbers': numbers,
+                    'tags': tags
+                })
+        
+        return financial_sentences
+
+    @staticmethod
     def summarize(content: str, allowed_numbers=None) -> str:
+        # First extract financial sentences
+        financial_sentences = SummarizationAgent.extract_financial_sentences(content)
+        
+        # Create a context string with the financial sentences
+        financial_context = "\n".join([
+            f"Sentence: {s['sentence']}\nNumbers: {', '.join(s['numbers'])}\nTags: {', '.join(s['tags'])}"
+            for s in financial_sentences
+        ])
+        
         start_time = time.time()
         # Directly send the prompt (already constructed in main.py) to the LLM
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a financial analyst."},
-                {"role": "user", "content": content}
+                {"role": "user", "content": financial_context}
             ],
             max_tokens=2048,
             temperature=0.5,
@@ -275,6 +317,7 @@ class SummarizationAgent:
         """
         Robustly extract the Management's Discussion and Analysis (MDA) section from the filing.
         Focuses on extracting from 'Item 7' (or 'Item 2') to the next major item.
+        Also identifies sentences containing financial tags and numbers.
         """
         import re
         from bs4 import BeautifulSoup
@@ -308,15 +351,6 @@ class SummarizationAgent:
             r'financial statements',
         ]
 
-        # Debug: Print all matches for each start pattern
-        for pat in start_patterns:
-            matches = list(re.finditer(pat, text_lower))
-            print(f'[DEBUG] Pattern: {pat} | Matches found: {len(matches)}')
-            for m in matches:
-                start_idx = m.start()
-                snippet = text_lower[start_idx:start_idx+200]
-                print(f'[DEBUG] Match at {start_idx}: {snippet}')
-
         # Find start of MDA
         start_idx = None
         for pat in start_patterns:
@@ -337,8 +371,39 @@ class SummarizationAgent:
             if end_idx is None:
                 end_idx = len(text)
             mda_section = text[start_idx:end_idx].strip()
-            if len(mda_section) > 200:  # Only return if it's a reasonable length
-                print(f"[extract_mda_section] Extracted MDA section (first 500 chars): {mda_section[:500]}")
+            
+            if len(mda_section) > 200:  # Only process if it's a reasonable length
+                # Split into sentences
+                sentences = re.split(r'(?<=[.!?])\s+', mda_section)
+                
+                # Patterns for financial numbers and tags
+                number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
+                tag_pattern = r'(?:us-gaap:|dei:)?[A-Za-z]+(?:[A-Za-z0-9]+)?'
+                
+                # Find sentences with both numbers and tags
+                financial_sentences = []
+                for sentence in sentences:
+                    has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
+                    has_tags = bool(re.search(tag_pattern, sentence))
+                    
+                    if has_numbers and has_tags:
+                        numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
+                        tags = re.findall(tag_pattern, sentence)
+                        financial_sentences.append({
+                            'sentence': sentence.strip(),
+                            'numbers': numbers,
+                            'tags': tags
+                        })
+                
+                # Add financial sentences to the response
+                if financial_sentences:
+                    mda_section += "\n\n=== Financial Highlights ===\n"
+                    for fs in financial_sentences:
+                        mda_section += f"\nSentence: {fs['sentence']}\n"
+                        mda_section += f"Numbers: {', '.join(fs['numbers'])}\n"
+                        mda_section += f"Tags: {', '.join(fs['tags'])}\n"
+                
+                print(f"[extract_mda_section] Extracted MDA section with financial highlights (first 500 chars): {mda_section[:500]}")
                 return mda_section
 
         # If not found, try header tag search for 'management's discussion'
@@ -356,10 +421,33 @@ class SummarizationAgent:
                         mda_text += sibling_text + " "
                     mda_text = mda_text.strip()
                     if len(mda_text) > 200:
-                        print(f"[extract_mda_section] Extracted MDA section from header tag (first 500 chars): {mda_text[:500]}")
+                        # Process financial sentences in the extracted text
+                        sentences = re.split(r'(?<=[.!?])\s+', mda_text)
+                        financial_sentences = []
+                        for sentence in sentences:
+                            has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
+                            has_tags = bool(re.search(tag_pattern, sentence))
+                            if has_numbers and has_tags:
+                                numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
+                                tags = re.findall(tag_pattern, sentence)
+                                financial_sentences.append({
+                                    'sentence': sentence.strip(),
+                                    'numbers': numbers,
+                                    'tags': tags
+                                })
+                        
+                        if financial_sentences:
+                            mda_text += "\n\n=== Financial Highlights ===\n"
+                            for fs in financial_sentences:
+                                mda_text += f"\nSentence: {fs['sentence']}\n"
+                                mda_text += f"Numbers: {', '.join(fs['numbers'])}\n"
+                                mda_text += f"Tags: {', '.join(fs['tags'])}\n"
+                        
+                        print(f"[extract_mda_section] Extracted MDA section with financial highlights from header tag (first 500 chars): {mda_text[:500]}")
                         return mda_text
         except Exception as e:
             print(f"[extract_mda_section] HTML header tag parsing failed: {e}")
+
         # Fallback: longest section with 'management' and 'discussion'
         print("[extract_mda_section] MDA section not found using robust item logic, falling back to previous method.")
         candidates = re.findall(r'([\s\S]{0,10000})', content)
@@ -368,8 +456,31 @@ class SummarizationAgent:
             if 'management' in c.lower() and 'discussion' in c.lower() and len(c) > len(best):
                 best = c
         if best:
-            print(f"[extract_mda_section] FINAL fallback: longest section with 'management' and 'discussion' (first 500 chars): {best[:500]}")
+            # Process financial sentences in the fallback text
+            sentences = re.split(r'(?<=[.!?])\s+', best)
+            financial_sentences = []
+            for sentence in sentences:
+                has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
+                has_tags = bool(re.search(tag_pattern, sentence))
+                if has_numbers and has_tags:
+                    numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
+                    tags = re.findall(tag_pattern, sentence)
+                    financial_sentences.append({
+                        'sentence': sentence.strip(),
+                        'numbers': numbers,
+                        'tags': tags
+                    })
+            
+            if financial_sentences:
+                best += "\n\n=== Financial Highlights ===\n"
+                for fs in financial_sentences:
+                    best += f"\nSentence: {fs['sentence']}\n"
+                    best += f"Numbers: {', '.join(fs['numbers'])}\n"
+                    best += f"Tags: {', '.join(fs['tags'])}\n"
+            
+            print(f"[extract_mda_section] FINAL fallback: longest section with 'management' and 'discussion' and financial highlights (first 500 chars): {best[:500]}")
             return best[:10000].strip()
+        
         print("[extract_mda_section] MDA section not found in HTML or text.")
         return "[MDA section not found in filing.]"
 
