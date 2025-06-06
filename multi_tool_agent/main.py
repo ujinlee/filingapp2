@@ -21,8 +21,8 @@ app.add_middleware(
         "https://front2.vercel.app",  # old Vercel frontend
         "https://front2-zeta.vercel.app",  # new Vercel frontend
         "https://filingapp.onrender.com"
-        "https://filingtalk.com",
-        "https://www.filingtalk.com"
+        # "https://filingtalk.com",
+        # "https://www.filingtalk.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -496,16 +496,20 @@ async def summarize_filing(request: SummarizeRequest):
         # Normalize speaker tags for the English transcript
         lines = [line for line in transcript.split('\n') if line.strip()]
         normalized_lines = []
-        current_speaker = 'ALEX:'  # Default to Alex for the first line if missing
+        last_speaker = 'ALEX:'
         for line in lines:
-            if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
-                # Trust the tag as written
-                cleaned_line = re.sub(r'^(ALEX:|JAMIE:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
+            if line.strip().startswith('ALEX:'):
+                cleaned_line = re.sub(r'^(ALEX:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
                 normalized_lines.append(cleaned_line)
-                current_speaker = cleaned_line.split(':')[0] + ':'  # Update for next missing tag
+                last_speaker = 'ALEX:'
+            elif line.strip().startswith('JAMIE:'):
+                cleaned_line = re.sub(r'^(JAMIE:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
+                normalized_lines.append(cleaned_line)
+                last_speaker = 'JAMIE:'
             else:
-                # Assign the last known speaker tag if missing
-                normalized_lines.append(f"{current_speaker} {line.strip()}")
+                # Alternate speaker if missing
+                last_speaker = 'JAMIE:' if last_speaker == 'ALEX:' else 'ALEX:'
+                normalized_lines.append(f"{last_speaker} {line.strip()}")
         transcript = '\n'.join(normalized_lines)
 
         if transcript:
