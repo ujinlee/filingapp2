@@ -281,10 +281,11 @@ async def summarize_filing(request: SummarizeRequest):
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract only revenue/sales/business/sector-related statements from the MDA section for bullet 1
+        # Extract only revenue/sales/business/sector/segment/driver-related statements from the MDA section for bullet 1
         def extract_revenue_statements(mda_text):
+            import re
             sentences = re.split(r'(?<=[.!?])\s+', mda_text)
-            keywords = ['revenue', 'revenues', 'sales', 'business', 'sector']
+            keywords = ['revenue', 'revenues', 'sales', 'business', 'sector', 'segment', 'driven by', 'due to']
             relevant = [s for s in sentences if any(kw in s.lower() for kw in keywords)]
             return ' '.join(relevant)
         revenue_statements = extract_revenue_statements(mda_section)
@@ -293,21 +294,12 @@ async def summarize_filing(request: SummarizeRequest):
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             "For this script, use the following:\n"
-            "1. For the Financial performance section, ONLY use the statements below about revenue, sales, business, or sector:\n"
+            "1. For the Financial performance section, ONLY use the statements below about revenue, sales, business, sector, segment, or containing phrases like 'driven by' or 'due to':\n"
             f"{revenue_statements}\n\n"
             "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below:\n"
             f"{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
-            "1. Financial performance: Focus on revenue changes and their explicit explanations. "
-            "- First, state the official revenue numbers for the current and previous period that are provided below. "
-            "- Then, extract and quote or restate ONLY the explicit explanations for revenue changes that are stated in the statements above. "
-            "- If business segments are mentioned as drivers of revenue changes, quote or restate exactly how they contributed, using the same wording as in the statements above. "
-            "- Do not mention or discuss any business segment unless it is explicitly named and discussed in the statements above. If a segment is not mentioned in the statements above, do not refer to it at all. "
-            "- When discussing any segment, only quote or restate what is explicitly stated in the statements above, using the same wording and numbers. "
-            "- Never infer, summarize, or generalize about any segment or reason for revenue change. "
-            "- If no explicit reasons for revenue changes are stated, simply mention the revenue change without speculating about causes. "
-            "- Do not make up, infer, or speculate about reasons for revenue changes. Only use explanations that are explicitly stated in the statements above. "
-            "- When stating whether revenue increased or decreased, always check the numbers provided below and ensure your statement matches the actual change. If the numbers show an increase, do not say it decreased, and vice versa. "
+            "1. Financial performance: Summarize revenue changes and their explicit explanations using ONLY the extracted statements above. Quote or restate the main drivers exactly as stated, especially phrases like 'driven by' or 'due to'. Do not infer, generalize, or mention anything not present in the extracted statements. Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script. "
             "2. Details and strategic drivers: Summarize from the full MDA section above. "
             "3. Risks, opportunities, and outlook: Summarize from the full MDA section above. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
