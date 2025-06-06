@@ -490,75 +490,74 @@ async def summarize_filing(request: SummarizeRequest):
             print(f"[ERROR] LLM call failed: {e}")
             transcript = ""
 
+        # Clean the English transcript before any further processing or display
+        transcript = clean_transcript(transcript)
+
         if transcript:
-            transcript = clean_transcript(transcript)
-        else:
-            print("[WARN] Transcript is empty after LLM call.")
+            # Remove stage directions like [Intro Music] before translation and TTS
+            def remove_stage_directions(transcript):
+                lines = transcript.split('\n')
+                filtered = [line for line in lines if not re.match(r'^\s*[A-Z]+:\s*\[.*\]\s*$', line)]
+                return '\n'.join(filtered)
+            transcript = remove_stage_directions(transcript)
 
-        # Remove stage directions like [Intro Music] before translation and TTS
-        def remove_stage_directions(transcript):
-            lines = transcript.split('\n')
-            filtered = [line for line in lines if not re.match(r'^\s*[A-Z]+:\s*\[.*\]\s*$', line)]
-            return '\n'.join(filtered)
-        transcript = remove_stage_directions(transcript)
+            # 8. Translate
+            try:
+                # For Korean, ensure currency is spoken as '1.91달러' (number first)
+                def fix_korean_currency(text):
+                    # Replace '달러 1.91' or '달러 1,000' with '1.91달러' or '1,000달러'
+                    return re.sub(r'달러\s*([\d,.]+)', r'\1달러', text)
+                if request.language.startswith('ko'):
+                    transcript = fix_korean_currency(transcript)
+                transcript = TranslationAgent.translate(transcript, request.language)
+                # Clean transcript again after translation to remove any reintroduced names
+                transcript = clean_transcript(transcript)
+                # After translation, preserve speaker tags if present, only alternate if missing
+                lines = [line for line in transcript.split('\n') if line.strip()]
+                normalized_lines = []
+                for line in lines:
+                    if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
+                        normalized_lines.append(line.strip())
+                    else:
+                        tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
+                        normalized_lines.append(f"{tag} {line.strip()}")
+                transcript = '\n'.join(normalized_lines)
+                # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
+                if request.language.startswith('ko'):
+                    transcript = re.sub(r'(Filing Talk|파일링 ?토크|필링 ?토크)', '파일링 토크', transcript, flags=re.IGNORECASE)
+                # After translation, clean up excessive asterisks in transcript
+                transcript = re.sub(r'\*{2,}', '', transcript)
+                # Remove or comment out verbose debug prints
+                # print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
+                tts_language = request.language
+                if transcript == summary and request.language != 'en-US':
+                    print("[main] Translation failed or fell back to English, using English TTS.")
+                    tts_language = 'en-US'
+            except Exception as e:
+                print("[ERROR] Exception in translation:", traceback.format_exc())
+                raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
 
-        # 8. Translate
-        try:
-            # For Korean, ensure currency is spoken as '1.91달러' (number first)
-            def fix_korean_currency(text):
-                # Replace '달러 1.91' or '달러 1,000' with '1.91달러' or '1,000달러'
-                return re.sub(r'달러\s*([\d,.]+)', r'\1달러', text)
-            if request.language.startswith('ko'):
-                transcript = fix_korean_currency(transcript)
-            transcript = TranslationAgent.translate(transcript, request.language)
-            # Clean transcript again after translation to remove any reintroduced names
-            transcript = clean_transcript(transcript)
-            # After translation, preserve speaker tags if present, only alternate if missing
-            lines = [line for line in transcript.split('\n') if line.strip()]
-            normalized_lines = []
-            for line in lines:
-                if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
-                    normalized_lines.append(line.strip())
-                else:
-                    tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
-                    normalized_lines.append(f"{tag} {line.strip()}")
-            transcript = '\n'.join(normalized_lines)
-            # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
-            if request.language.startswith('ko'):
-                transcript = re.sub(r'(Filing Talk|파일링 ?토크|필링 ?토크)', '파일링 토크', transcript, flags=re.IGNORECASE)
-            # After translation, clean up excessive asterisks in transcript
-            transcript = re.sub(r'\*{2,}', '', transcript)
-            # Remove or comment out verbose debug prints
-            # print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
-            tts_language = request.language
-            if transcript == summary and request.language != 'en-US':
-                print("[main] Translation failed or fell back to English, using English TTS.")
-                tts_language = 'en-US'
-        except Exception as e:
-            print("[ERROR] Exception in translation:", traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
+            # 9. Generate audio
+            try:
+                audio_filename = TTSAgent.synthesize(transcript, tts_language)
+                audio_path = os.path.join(AUDIO_DIR, audio_filename)
+                if not os.path.exists(audio_path):
+                    raise HTTPException(status_code=500, detail=f"Audio file not found at {audio_path}")
+                audio_url = f"/audio/{audio_filename}"
+                # Remove or comment out verbose debug prints
+                # print(f"Audio URL: {audio_url}")
+            except Exception as e:
+                print("[ERROR] Exception in TTS synthesis:", traceback.format_exc())
+                raise HTTPException(status_code=500, detail=f"Text-to-Speech failed: {str(e)}")
 
-        # 9. Generate audio
-        try:
-            audio_filename = TTSAgent.synthesize(transcript, tts_language)
-            audio_path = os.path.join(AUDIO_DIR, audio_filename)
-            if not os.path.exists(audio_path):
-                raise HTTPException(status_code=500, detail=f"Audio file not found at {audio_path}")
-            audio_url = f"/audio/{audio_filename}"
-            # Remove or comment out verbose debug prints
-            # print(f"Audio URL: {audio_url}")
-        except Exception as e:
-            print("[ERROR] Exception in TTS synthesis:", traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Text-to-Speech failed: {str(e)}")
+            # Add a concise debug print for XBRL extraction results
+            print(f"[DEBUG] XBRL extracted: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
 
-        # Add a concise debug print for XBRL extraction results
-        print(f"[DEBUG] XBRL extracted: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
-
-        return SummarizeResponse(
-            audio_url=audio_url,
-            transcript=transcript,
-            summary=summary
-        )
+            return SummarizeResponse(
+                audio_url=audio_url,
+                transcript=transcript,
+                summary=summary
+            )
     except HTTPException as e:
         print("[ERROR] HTTPException in summarize_filing:", traceback.format_exc())
         raise e
