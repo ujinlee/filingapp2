@@ -340,13 +340,13 @@ class SummarizationAgent:
 
         # Patterns for start and end of MDA (more robust for quotes and variations)
         start_patterns = [
-            r'item\s*7[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
-            r'item\s*2[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
-            r'item\s*7[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
-            r'item\s*2[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*7[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
+            r'item\s*2[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
+            r'item\s*7[\s\S]{0,1000}?management[’\'`s ]*discussion',
+            r'item\s*2[\s\S]{0,1000}?management[’\'`s ]*discussion',
             r'item\s*7[.:\-\s]+',
             r'item\s*2[.:\-\s]+',
-            r'item\s*(ii|two)[.:\-\s]+',
+            r'item\s*(ii|two)[.:\-\s]+',  # Roman numerals or written
         ]
         end_patterns = [
             r'item\s*3[.:\-]+', r'item\s*4[.:\-]+', r'item\s*7a[.:\-]+', r'item\s*8[.:\-]+',
@@ -450,13 +450,13 @@ class SummarizationAgent:
 
         # Regex fallback
         mda_patterns = [
-            r'item\s*7[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
-            r'item\s*2[.:\-\s]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
-            r'item\s*7[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
-            r'item\s*2[\s\S]{0,1000}?(management[’'`\u2019\u2018\u201b\u201c\u201d\u0060\u00b4]?s?\s+discussion)',
+            r'item\s*7[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
+            r'item\s*2[.:\-\s]{0,1000}?management[’\'`s ]*discussion',
+            r'item\s*7[\s\S]{0,1000}?management[’\'`s ]*discussion',
+            r'item\s*2[\s\S]{0,1000}?management[’\'`s ]*discussion',
             r'item\s*7[.:\-\s]+',
             r'item\s*2[.:\-\s]+',
-            r'item\s*(ii|two)[.:\-\s]+',
+            r'item\s*(ii|two)[.:\-\s]+',  # Roman numerals or written
         ]
         end_patterns = [
             r'item\s*3[.:\-]+', r'item\s*4[.:\-]+', r'item\s*7a[.:\-]+', r'item\s*8[.:\-]+',
