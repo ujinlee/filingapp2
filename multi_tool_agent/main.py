@@ -242,6 +242,21 @@ async def summarize_filing(request: SummarizeRequest):
         # Remove the verbose extract_mda_section debug print
         # print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
 
+        # After extracting mda_section
+        if not mda_section or len(mda_section) < 500 or mda_section == "[MDA section not found in filing.]" or re.match(r'^item \d+management', mda_section.strip().lower()):
+            print("[DEBUG] MDA extraction too short or only header, using final fallback.")
+            candidates = re.findall(r'([\s\S]{0,10000})', content)
+            best = ''
+            for c in candidates:
+                if 'management' in c.lower() and 'discussion' in c.lower() and len(c) > len(best):
+                    best = c
+            if best and len(best) > 500:
+                print(f"[DEBUG] Final fallback - MDA section length: {len(best)} characters")
+                mda_section = best[:10000].strip()
+            else:
+                print("[DEBUG] All MDA extraction failed, using entire filing text.")
+                mda_section = content[:10000].strip()
+
         def format_number_pair(label, current, previous, always_float=False):
             if current is None and previous is None:
                 return f"{label}: (not available)\n"
@@ -351,7 +366,26 @@ async def summarize_filing(request: SummarizeRequest):
                 text = re.sub(pat, '', text, flags=re.IGNORECASE)
             return text
 
+        # After extracting entity/company name (assume variable company_name is available or set to None if not)
+        company_name = None
+        try:
+            cik = SECAgent.get_cik_from_ticker(request.documentUrl.split('/')[-1].split('.')[0])
+            if cik:
+                url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+                response = requests.get(url)
+                if response.status_code == 200:
+                    data = response.json()
+                    company_name = data.get('name', None)
+        except Exception as e:
+            print(f"[DEBUG] Could not extract company name for prompt: {e}")
+
+        # Add debug print for extracted MDA section
+        print(f"[DEBUG] Extracted MDA section (first 500 chars): {mda_section[:500]}")
+
+        # Add company name to the prompt if available
+        company_intro = f"The company discussed in this filing is {company_name}.\n" if company_name else ""
         prompt = (
+            company_intro +
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             "For this script, use the following instructions:\n"
@@ -406,6 +440,9 @@ async def summarize_filing(request: SummarizeRequest):
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
 
+        # After LLM output, clean up excessive asterisks
+        summary = re.sub(r'\*{2,}', '', summary)
+
         # 8. Translate
         try:
             transcript = TranslationAgent.translate(summary, request.language)
@@ -422,6 +459,8 @@ async def summarize_filing(request: SummarizeRequest):
             # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
             if request.language.startswith('ko'):
                 transcript = re.sub(r'(Filing Talk|파일링 ?토크|필링 ?토크)', '파일링 토크', transcript, flags=re.IGNORECASE)
+            # After translation, clean up excessive asterisks in transcript
+            transcript = re.sub(r'\*{2,}', '', transcript)
             # Remove or comment out verbose debug prints
             # print(f"[DEBUG] Final transcript before TTS:\n{transcript}")
             tts_language = request.language
