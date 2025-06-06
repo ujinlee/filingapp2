@@ -2,107 +2,116 @@ import logging
 import pandas as pd
 from bs4 import BeautifulSoup
 from arelle import Cntlr
-
-# Set up logging at the top of the file
-logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
-
-from dotenv import load_dotenv
-load_dotenv()
-import os
-print("GOOGLE_APPLICATION_CREDENTIALS:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-import requests
-import re
-from bs4 import BeautifulSoup
-import google.generativeai as genai
-from google.cloud import texttospeech
-import time
-import glob
 from datetime import datetime, timedelta
-import io
-from concurrent.futures import ThreadPoolExecutor
-from google.cloud import translate_v2 as translate
-import html
-import inflect
-import openai
-print("[DEBUG] openai module version:", getattr(openai, '__version__', 'unknown'))
-print("[DEBUG] OPENAI_API_KEY is set:", bool(os.getenv("OPENAI_API_KEY")))
-import tiktoken
-import numpy as np
+import time
+import requests
+from typing import Optional, Tuple, List, Dict
+import re
+import os
+from dotenv import load_dotenv
 
-SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
-if not SEC_USER_AGENT_EMAIL or SEC_USER_AGENT_EMAIL == "your-email@domain.com":
-    raise RuntimeError("SEC_USER_AGENT_EMAIL environment variable must be set to your real email address for SEC access.")
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=GOOGLE_API_KEY)
+# Load environment variables
+load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+class SECRateLimiter:
+    def __init__(self):
+        self.requests: List[datetime] = []
+        self.max_requests = 10  # SEC's limit
+        self.time_window = 1    # 1 second window
+        logger.info("Initialized SECRateLimiter with max_requests=%d, time_window=%d", 
+                   self.max_requests, self.time_window)
 
-# Use absolute path for audio directory
-AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
-os.makedirs(AUDIO_DIR, exist_ok=True)
-print(f"Audio directory path: {AUDIO_DIR}")
-
-# Maximum number of audio files to keep
-MAX_AUDIO_FILES = 500
-# Maximum age of audio files in hours
-MAX_FILE_AGE_HOURS = 24
-
-def cleanup_old_files():
-    """Remove old audio files to prevent the directory from growing too large."""
-    try:
-        # Get all MP3 files
-        files = glob.glob(os.path.join(AUDIO_DIR, "*.mp3"))
+    def wait_if_needed(self):
+        now = datetime.now()
+        # Remove requests older than 1 second
+        self.requests = [req_time for req_time in self.requests 
+                        if now - req_time < timedelta(seconds=self.time_window)]
         
-        # Sort files by modification time (oldest first)
-        files.sort(key=os.path.getmtime)
+        if len(self.requests) < self.max_requests:
+            # No need to wait if under limit
+            self.requests.append(now)
+            return
         
-        # Remove files older than MAX_FILE_AGE_HOURS
-        current_time = datetime.now()
-        for file in files:
-            file_time = datetime.fromtimestamp(os.path.getmtime(file))
-            if current_time - file_time > timedelta(hours=MAX_FILE_AGE_HOURS):
-                try:
-                    os.remove(file)
-                    print(f"Removed old file: {file}")
-                except Exception as e:
-                    print(f"Error removing file {file}: {e}")
-        
-        # If still too many files, remove oldest ones
-        files = glob.glob(os.path.join(AUDIO_DIR, "*.mp3"))
-        if len(files) > MAX_AUDIO_FILES:
-            files_to_remove = files[:len(files) - MAX_AUDIO_FILES]
-            for file in files_to_remove:
-                try:
-                    os.remove(file)
-                    print(f"Removed excess file: {file}")
-                except Exception as e:
-                    print(f"Error removing file {file}: {e}")
-                    
-        # Print current file count
-        remaining_files = len(glob.glob(os.path.join(AUDIO_DIR, "*.mp3")))
-        print(f"Current number of audio files: {remaining_files}")
-    except Exception as e:
-        print(f"Error in cleanup_old_files: {e}")
-
-def sec_get(url, **kwargs):
-    headers = kwargs.pop("headers", {})
-    headers["User-Agent"] = f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})"
-    headers["Accept-Encoding"] = "gzip, deflate"
-    response = requests.get(url, headers=headers, **kwargs)
-    if response.status_code == 403:
-        print(f"[SEC 403 ERROR] Forbidden when accessing {url}\nHeaders: {headers}")
-        raise Exception(f"SEC 403 Forbidden: {url}")
-    time.sleep(1)  # Avoid SEC rate limiting
-    return response
+        # Calculate exact wait time needed
+        oldest_request = self.requests[0]
+        wait_time = (oldest_request + timedelta(seconds=self.time_window) - now).total_seconds()
+        if wait_time > 0:
+            logger.debug("Rate limit reached, waiting %.2f seconds", wait_time)
+            time.sleep(wait_time)
+        self.requests.append(now)
 
 class SECAgent:
+    def __init__(self):
+        self.rate_limiter = SECRateLimiter()
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": f"Financial Filing Podcast Summarizer ({os.getenv('SEC_USER_AGENT_EMAIL')})",
+            "Accept-Encoding": "gzip, deflate"
+        })
+        logger.info("Initialized SECAgent with rate limiting")
+
+    def sec_get(self, url: str, **kwargs) -> requests.Response:
+        """
+        Make a rate-limited request to SEC's API.
+        """
+        self.rate_limiter.wait_if_needed()
+        try:
+            response = self.session.get(url, **kwargs)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            if response.status_code == 403:
+                logger.error("SEC 403 Forbidden: %s", url)
+                raise Exception(f"SEC 403 Forbidden: {url}")
+            logger.error("Error in sec_get: %s", str(e))
+            raise e
+
+    def fetch_document(self, document_url: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Fetch and process a document from SEC with rate limiting and retries.
+        """
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                self.rate_limiter.wait_if_needed()
+                response = self.session.get(document_url, timeout=30)
+                response.raise_for_status()
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                content = soup.get_text()
+                content = re.sub(r'\s+', ' ', content)
+                content = re.sub(r'[^\w\s.,;:!?()-]', '', content)
+                content = content.strip()
+                
+                if not content or len(content) < 100:
+                    logger.warning("Filing content is empty or too short")
+                    return None, "Filing content is empty or too short"
+                return content, None
+                
+            except requests.exceptions.RequestException as e:
+                logger.error("Error fetching document (attempt %d/%d): %s", 
+                           attempt + 1, max_retries, str(e))
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    logger.info("Retrying in %.2f seconds...", wait_time)
+                    time.sleep(wait_time)
+                else:
+                    return None, f"Failed to fetch filing after {max_retries} attempts: {str(e)}"
+
     @staticmethod
-    def get_cik_from_ticker(ticker_or_name: str):
+    def get_cik_from_ticker(ticker_or_name: str) -> Optional[str]:
+        """
+        Get CIK number from ticker or company name with rate limiting.
+        """
         url = "https://www.sec.gov/files/company_tickers.json"
         try:
-            response = sec_get(url, timeout=10)
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
             companies = response.json()
             
@@ -123,21 +132,24 @@ class SECAgent:
             
             return None
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching CIK for {ticker_or_name}: {str(e)}")
+            logger.error("Error fetching CIK for %s: %s", ticker_or_name, str(e))
             return None
 
-    @staticmethod
-    def list_filings(ticker_or_name: str):
-        cik = SECAgent.get_cik_from_ticker(ticker_or_name)
+    def list_filings(self, ticker_or_name: str) -> Tuple[Optional[List[Dict]], Optional[str]]:
+        """
+        List filings for a company with rate limiting.
+        """
+        cik = self.get_cik_from_ticker(ticker_or_name)
         if not cik:
             return None, f"CIK not found for {ticker_or_name}"
+            
         url = f"https://data.sec.gov/submissions/CIK{cik}.json"
         try:
-            response = sec_get(url, timeout=10)
-            response.raise_for_status()
+            response = self.sec_get(url, timeout=10)
             data = response.json()
             forms = data.get("filings", {}).get("recent", {})
             filings = []
+            
             for form, date, accession, doc in zip(
                     forms.get("form", []),
                     forms.get("filingDate", []),
@@ -154,48 +166,8 @@ class SECAgent:
                     })
             return filings, None
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching filings for {ticker_or_name}: {str(e)}")
+            logger.error("Error fetching filings for %s: %s", ticker_or_name, str(e))
             return None, f"Could not fetch filings for {ticker_or_name}: {str(e)}"
-
-    @staticmethod
-    def fetch_document(document_url: str):
-        headers = {
-            "User-Agent": f"Financial Filing Podcast Summarizer ({SEC_USER_AGENT_EMAIL})",
-            "Accept-Encoding": "gzip, deflate"
-        }
-        max_retries = 3
-        retry_delay = 2  # seconds
-        for attempt in range(max_retries):
-            try:
-                import socket
-                domain = "www.sec.gov"
-                try:
-                    socket.gethostbyname(domain)
-                except socket.gaierror as e:
-                    print(f"DNS resolution failed for {domain}: {str(e)}")
-                    if attempt < max_retries - 1:
-                        print(f"Retrying in {retry_delay} seconds...")
-                        time.sleep(retry_delay)
-                        continue
-                    return None, f"Could not resolve SEC domain: {str(e)}"
-                response = sec_get(document_url, timeout=30)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'html.parser')
-                content = soup.get_text()
-                content = re.sub(r'\s+', ' ', content)
-                content = re.sub(r'[^\w\s.,;:!?()-]', '', content)
-                content = content.strip()
-                if not content or len(content) < 100:
-                    return None, "Filing content is empty or too short"
-                return content, None
-            except requests.exceptions.RequestException as e:
-                print(f"Error fetching document (attempt {attempt + 1}/{max_retries}): {str(e)}")
-                if attempt < max_retries - 1:
-                    print(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    return None, f"Failed to fetch filing after {max_retries} attempts: {str(e)}"
 
 class SummarizationAgent:
     @staticmethod
