@@ -281,16 +281,24 @@ async def summarize_filing(request: SummarizeRequest):
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract only the most relevant statements for bullet 1
+        # Extract up to 7 relevant sentences after the last table-like line in the MDA section for bullet 1
+        def extract_post_table_sentences(mda_text, num_sentences=7):
+            lines = mda_text.split('\n')
+            table_end_idx = -1
+            for i, line in enumerate(lines):
+                if re.search(r'\$|\d{1,3}(,\d{3})+', line):
+                    table_end_idx = i
+            post_table_text = '\n'.join(lines[table_end_idx+1:])
+            sentences = re.split(r'(?<=[.!?])\s+', post_table_text)
+            return sentences[:num_sentences]
         def extract_revenue_statements(mda_text):
-            import re
-            sentences = re.split(r'(?<=[.!?])\s+', mda_text)
             keywords = [
                 'increase', 'increased', 'decrease', 'decreased',
                 'driven by', 'due to',
                 'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
             ]
-            relevant = [s for s in sentences if any(kw in s.lower() for kw in keywords)]
+            post_table_sentences = extract_post_table_sentences(mda_text, num_sentences=7)
+            relevant = [s for s in post_table_sentences if any(kw in s.lower() for kw in keywords)]
             return ' '.join(relevant)
         revenue_statements = extract_revenue_statements(mda_section)
 
@@ -304,6 +312,7 @@ async def summarize_filing(request: SummarizeRequest):
             f"{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
             "1. Financial performance: Summarize revenue changes and their explicit explanations using ONLY the extracted statements above.\n"
+            "- If a sentence contains both the numbers and the direction (increase/decrease) and the main driver (e.g., 'primarily driven by'), quote the entire sentence exactly as written. Do not paraphrase, summarize, or create a new sentence. Only use the exact sentence from the extracted statements.\n"
             "- Quote or restate the main drivers exactly as stated, especially phrases like 'driven by', 'due to', 'increase', 'decrease', 'increased', or 'decreased'.\n"
             "- If a statement includes a main driver or primary reason (e.g., 'primarily driven by', 'mainly due to'), you must quote or restate that part exactly, and make it the focus of your summary.\n"
             "- Do not summarize or generalize; always use the same wording and order as in the extracted statement.\n"
