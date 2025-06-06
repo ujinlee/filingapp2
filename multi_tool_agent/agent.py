@@ -317,7 +317,7 @@ class SummarizationAgent:
         """
         Robustly extract the Management's Discussion and Analysis (MDA) section from the filing.
         Focuses on extracting from 'Item 7' (or 'Item 2') to the next major item.
-        Also identifies sentences containing financial tags and numbers.
+        Also identifies sentences containing financial tags and numbers and driver keywords.
         """
         import re
         from bs4 import BeautifulSoup
@@ -325,6 +325,10 @@ class SummarizationAgent:
         # Define patterns at the top so they are always available
         number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
         tag_pattern = r'(?:us-gaap:|dei:)?[A-Za-z]+(?:[A-Za-z0-9]+)?'
+        driver_keywords = [
+            "increase", "decrease", "due to", "driven by", "result of", "because", "as a result",
+            "business", "segment", "sector", "revenue", "revenues", "sales"
+        ]
 
         # Convert HTML to plain text for regex search
         try:
@@ -380,28 +384,19 @@ class SummarizationAgent:
                 # Split into sentences
                 sentences = re.split(r'(?<=[.!?])\s+', mda_section)
                 
-                # Find sentences with both numbers and tags
+                # Find sentences with both numbers and driver keywords
                 financial_sentences = []
                 for sentence in sentences:
-                    has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
-                    has_tags = bool(re.search(tag_pattern, sentence))
-                    
-                    if has_numbers and has_tags:
-                        numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
-                        tags = re.findall(tag_pattern, sentence)
-                        financial_sentences.append({
-                            'sentence': sentence.strip(),
-                            'numbers': numbers,
-                            'tags': tags
-                        })
+                    has_number = bool(re.search(number_pattern, sentence, re.IGNORECASE))
+                    has_driver = any(kw in sentence.lower() for kw in driver_keywords)
+                    if has_number and has_driver:
+                        financial_sentences.append(sentence.strip())
                 
                 # Add financial sentences to the response
                 if financial_sentences:
                     mda_section += "\n\n=== Financial Highlights ===\n"
                     for fs in financial_sentences:
-                        mda_section += f"\nSentence: {fs['sentence']}\n"
-                        mda_section += f"Numbers: {', '.join(fs['numbers'])}\n"
-                        mda_section += f"Tags: {', '.join(fs['tags'])}\n"
+                        mda_section += f"\n{fs}"
                 
                 print(f"[extract_mda_section] Extracted MDA section with financial highlights (first 500 chars): {mda_section[:500]}")
                 return mda_section

@@ -275,21 +275,31 @@ async def summarize_filing(request: SummarizeRequest):
             except Exception:
                 return str(n)
 
-        # 6. Build the LLM prompt with both numbers and MDA
-        def format_comparison(current, previous, label):
-            if current and previous and current.get('value') and previous.get('value'):
-                return f"{label}: {humanize_large_number(current['value'])} (prior: {humanize_large_number(previous['value'])})"
-            elif current and current.get('value'):
-                return f"{label}: {current['value']}"
+        def format_eps(eps):
+            try:
+                return f"{float(eps):.2f}"
+            except Exception:
+                return str(eps)
+
+        def format_comparison(current, previous, label, is_eps=False):
+            if current and current.get('value'):
+                curr_val = format_eps(current['value']) if is_eps else humanize_large_number(current['value'])
+                if previous and previous.get('value'):
+                    prev_val = format_eps(previous['value']) if is_eps else humanize_large_number(previous['value'])
+                    return f"{label}: {curr_val} (prior: {prev_val})"
+                else:
+                    return f"{label}: {curr_val}"
             else:
-                return f"{label}: (not available)"
+                return ""  # Omit if not available
 
         numbers_section = ""
-        numbers_section += format_comparison(revenue, previous_revenue, "Revenue") + "\n"
-        numbers_section += format_comparison(net_income, previous_net_income, "Net Income") + "\n"
-        numbers_section += format_comparison(eps, previous_eps, "EPS") + "\n"
-        if not revenue or not revenue.get('value'):
-            numbers_section += "(No official numbers were found for this period.)\n"
+        rev_line = format_comparison(revenue, previous_revenue, "Revenue")
+        ni_line = format_comparison(net_income, previous_net_income, "Net Income")
+        eps_line = format_comparison(eps, previous_eps, "EPS", is_eps=True)
+        for line in [rev_line, ni_line, eps_line]:
+            if line:
+                numbers_section += line + "\n"
+        numbers_section = numbers_section.strip()
 
         # Extract financial highlights from MDA if present
         financial_highlights = ""
@@ -304,7 +314,7 @@ async def summarize_filing(request: SummarizeRequest):
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
-            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL, and compare the current period to the prior period if both are available. Highlight quarter-over-quarter or year-over-year changes in revenue, net income, and EPS). "
+            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL, and the extracted Financial Highlights below. The Financial Highlights are sentences from the MDA that contain both numbers and driver keywords such as increase, decrease, due to, driven by, result of, business, segment, sector, revenue, revenues, sales, etc. Explain the main drivers behind the numbers using these highlights. Do not use any other part of the MDA for this section.) "
             "2. Details and strategic drivers (discuss what drove the numbers, management commentary, business segments, etc. from the MDA). "
             "3. Risks, opportunities, and outlook (cover forward-looking statements, risk factors, and opportunities from the MDA). "
             "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
