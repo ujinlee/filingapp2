@@ -317,16 +317,14 @@ class SummarizationAgent:
         """
         Robustly extract the Management's Discussion and Analysis (MDA) section from the filing.
         Focuses on extracting from 'Item 7' (or 'Item 2') to the next major item.
-        Also identifies up to 5 sentences containing both numbers and driver keywords immediately AFTER EACH data table.
+        Also identifies sentences containing financial tags and numbers.
         """
         import re
         from bs4 import BeautifulSoup
 
+        # Define patterns at the top so they are always available
         number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
-        driver_keywords = [
-            "increase", "decrease", "due to", "driven by", "result of", "because", "as a result",
-            "business", "segment", "sector", "revenue", "revenues", "sales"
-        ]
+        tag_pattern = r'(?:us-gaap:|dei:)?[A-Za-z]+(?:[A-Za-z0-9]+)?'
 
         # Convert HTML to plain text for regex search
         try:
@@ -379,59 +377,33 @@ class SummarizationAgent:
             mda_section = text[start_idx:end_idx].strip()
             
             if len(mda_section) > 200:  # Only process if it's a reasonable length
-                try:
-                    soup = BeautifulSoup(content, 'html.parser')
-                    tables = soup.find_all('table')
-                    financial_sentences = []
-                    for table in tables:
-                        after_table = ""
-                        for elem in table.next_siblings:
-                            if hasattr(elem, 'get_text'):
-                                after_table += elem.get_text(separator=' ', strip=True) + ' '
-                            elif isinstance(elem, str):
-                                after_table += elem.strip() + ' '
-                        sentences = re.split(r'(?<=[.!?])\s+', after_table)
-                        count = 0
-                        for sentence in sentences:
-                            has_number = bool(re.search(number_pattern, sentence, re.IGNORECASE))
-                            has_driver = any(kw in sentence.lower() for kw in driver_keywords)
-                            if has_number and has_driver:
-                                financial_sentences.append(sentence.strip())
-                                count += 1
-                                if count >= 5:
-                                    break
-                    # Deduplicate sentences while preserving order
-                    seen = set()
-                    deduped_financial_sentences = []
-                    for s in financial_sentences:
-                        if s not in seen:
-                            deduped_financial_sentences.append(s)
-                            seen.add(s)
-                    if deduped_financial_sentences:
-                        mda_section += "\n\n=== Financial Highlights ===\n"
-                        for fs in deduped_financial_sentences:
-                            mda_section += f"\n{fs}"
-                        print(f"[extract_mda_section] Extracted MDA section with financial highlights after all tables (first 500 chars): {mda_section[:500]}")
-                        return mda_section
-                except Exception as e:
-                    print(f"[extract_mda_section] Table extraction failed: {e}")
-                # Fallback: use previous logic if table not found
+                # Split into sentences
                 sentences = re.split(r'(?<=[.!?])\s+', mda_section)
+                
+                # Find sentences with both numbers and tags
                 financial_sentences = []
-                count = 0
                 for sentence in sentences:
-                    has_number = bool(re.search(number_pattern, sentence, re.IGNORECASE))
-                    has_driver = any(kw in sentence.lower() for kw in driver_keywords)
-                    if has_number and has_driver:
-                        financial_sentences.append(sentence.strip())
-                        count += 1
-                        if count >= 5:
-                            break
+                    has_numbers = bool(re.search(number_pattern, sentence, re.IGNORECASE))
+                    has_tags = bool(re.search(tag_pattern, sentence))
+                    
+                    if has_numbers and has_tags:
+                        numbers = re.findall(number_pattern, sentence, re.IGNORECASE)
+                        tags = re.findall(tag_pattern, sentence)
+                        financial_sentences.append({
+                            'sentence': sentence.strip(),
+                            'numbers': numbers,
+                            'tags': tags
+                        })
+                
+                # Add financial sentences to the response
                 if financial_sentences:
                     mda_section += "\n\n=== Financial Highlights ===\n"
                     for fs in financial_sentences:
-                        mda_section += f"\n{fs}"
-                print(f"[extract_mda_section] Extracted MDA section with fallback highlights (first 500 chars): {mda_section[:500]}")
+                        mda_section += f"\nSentence: {fs['sentence']}\n"
+                        mda_section += f"Numbers: {', '.join(fs['numbers'])}\n"
+                        mda_section += f"Tags: {', '.join(fs['tags'])}\n"
+                
+                print(f"[extract_mda_section] Extracted MDA section with financial highlights (first 500 chars): {mda_section[:500]}")
                 return mda_section
 
         # If not found, try header tag search for 'management's discussion'
