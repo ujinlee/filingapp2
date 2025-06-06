@@ -446,9 +446,8 @@ async def summarize_filing(request: SummarizeRequest):
 
         # After LLM output is generated (assume variable 'transcript' holds the script)
         def clean_transcript(transcript):
-            # Remove redundant 'Alex:' or 'Jamie:' after speaker tag
-            transcript = re.sub(r'^(ALEX:)\s*Alex:\s*', r'\1 ', transcript, flags=re.MULTILINE)
-            transcript = re.sub(r'^(JAMIE:)\s*Jamie:\s*', r'\1 ', transcript, flags=re.MULTILINE)
+            # Remove any 'Alex:' or 'Jamie:' after any speaker tag at the start of the line
+            transcript = re.sub(r'^(ALEX:|JAMIE:)\s*(Alex:|Jamie:)\s*', r'\1 ', transcript, flags=re.MULTILINE)
             # Remove self-introductions at the start of the line after the speaker tag
             pattern_alex = (
                 r"^(ALEX:)\s*"
@@ -475,6 +474,11 @@ async def summarize_filing(request: SummarizeRequest):
             # Remove 'joined today by Jamie' or 'joined by Alex' at the start
             transcript = re.sub(r'^(ALEX:).*joined (today )?by Jamie[,.!\s-]*', r'\1 ', transcript, flags=re.MULTILINE | re.IGNORECASE)
             transcript = re.sub(r'^(JAMIE:).*joined (today )?by Alex[,.!\s-]*', r'\1 ', transcript, flags=re.MULTILINE | re.IGNORECASE)
+            # Remove lines that are just stage directions like [Background Music Fades In] or [Intro Music]
+            transcript = re.sub(r'^(ALEX:|JAMIE:)\s*\[.*?music.*?\]\s*$', '', transcript, flags=re.MULTILINE | re.IGNORECASE)
+            transcript = re.sub(r'^(ALEX:|JAMIE:)\s*\[.*?applause.*?\]\s*$', '', transcript, flags=re.MULTILINE | re.IGNORECASE)
+            # Remove any empty lines left after removals
+            transcript = '\n'.join([line for line in transcript.split('\n') if line.strip()])
             return transcript
         # ...
         # After you get the LLM output (e.g., 'transcript = ...')
