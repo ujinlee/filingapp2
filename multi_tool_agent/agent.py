@@ -322,6 +322,10 @@ class SummarizationAgent:
         import re
         from bs4 import BeautifulSoup
 
+        # Define patterns at the top so they are always available
+        number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
+        tag_pattern = r'(?:us-gaap:|dei:)?[A-Za-z]+(?:[A-Za-z0-9]+)?'
+
         # Convert HTML to plain text for regex search
         try:
             soup = BeautifulSoup(content, 'html.parser')
@@ -375,10 +379,6 @@ class SummarizationAgent:
             if len(mda_section) > 200:  # Only process if it's a reasonable length
                 # Split into sentences
                 sentences = re.split(r'(?<=[.!?])\s+', mda_section)
-                
-                # Patterns for financial numbers and tags
-                number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
-                tag_pattern = r'(?:us-gaap:|dei:)?[A-Za-z]+(?:[A-Za-z0-9]+)?'
                 
                 # Find sentences with both numbers and tags
                 financial_sentences = []
