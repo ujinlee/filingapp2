@@ -496,13 +496,16 @@ async def summarize_filing(request: SummarizeRequest):
         # Normalize speaker tags for the English transcript
         lines = [line for line in transcript.split('\n') if line.strip()]
         normalized_lines = []
+        current_speaker = 'ALEX:'  # Default to Alex for the first line if missing
         for line in lines:
             if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
+                # Trust the tag as written
                 cleaned_line = re.sub(r'^(ALEX:|JAMIE:)\s*(ALEX:|JAMIE:)?\s*', r'\1 ', line.strip())
                 normalized_lines.append(cleaned_line)
+                current_speaker = cleaned_line.split(':')[0] + ':'  # Update for next missing tag
             else:
-                tag = 'ALEX:' if len(normalized_lines) % 2 == 0 else 'JAMIE:'
-                normalized_lines.append(f"{tag} {line.strip()}")
+                # Assign the last known speaker tag if missing
+                normalized_lines.append(f"{current_speaker} {line.strip()}")
         transcript = '\n'.join(normalized_lines)
 
         if transcript:
