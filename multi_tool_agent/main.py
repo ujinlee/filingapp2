@@ -242,43 +242,44 @@ async def summarize_filing(request: SummarizeRequest):
         # Remove the verbose extract_mda_section debug print
         # print(f"[extract_mda_section] Filing content (first 1000 chars): {content[:1000]}")
 
-        # Improved MDA fallback extraction
-        if not mda_section or len(mda_section) < 500 or mda_section == "[MDA section not found in filing.]" or re.match(r'^item \d+management', mda_section.strip().lower()):
-            print("[DEBUG] MDA extraction too short or only header, using improved fallback.")
-            # Try to extract between Item 2 and Item 3 (or Item 7 and Item 7A/8), with broader regex
-            mda_match = re.search(r'(item\s*2[\s\S]+?)(item\s*3|item\s*4|item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
-            if not mda_match:
-                mda_match = re.search(r'(item\s*7[\s\S]+?)(item\s*7a|item\s*8|item\s*3|item\s*4|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
-            if mda_match:
-                mda_section = mda_match.group(1).strip()
-                print(f"[DEBUG] Regex section fallback - MDA section length: {len(mda_section)} characters")
-                print(f"[DEBUG] Regex section fallback - MDA section (full): {mda_section}")
-                # If still only header, try to extract a large window after the header
-                if len(mda_section) < 500 or re.match(r'^item \d+management', mda_section.strip().lower()):
-                    print("[DEBUG] Regex fallback only found header, extracting large window after header.")
-                    header_match = re.search(r'(item\s*2|item\s*7)', content, re.IGNORECASE)
-                    if header_match:
-                        start_idx = header_match.start()
-                        mda_section = content[start_idx:start_idx+10000].strip()
-                        print(f"[DEBUG] Large window fallback - MDA section (first 500 chars): {mda_section[:500]}")
-            else:
-                print("[DEBUG] Regex section fallback failed, using alpha-ratio filter fallback.")
-                candidates = re.findall(r'([\s\S]{0,10000})', content)
-                best = ''
-                best_alpha = 0
-                for c in candidates:
-                    if 'management' in c.lower() and 'discussion' in c.lower():
-                        alpha_ratio = sum(ch.isalpha() for ch in c) / max(1, len(c))
-                        print(f"[DEBUG] Candidate section alpha ratio: {alpha_ratio:.2f}, length: {len(c)}")
-                        if alpha_ratio > 0.5 and len(c) > len(best):
-                            best = c
-                            best_alpha = alpha_ratio
-                if best and len(best) > 500:
-                    print(f"[DEBUG] Alpha-ratio fallback - MDA section length: {len(best)} characters, alpha ratio: {best_alpha:.2f}")
-                    mda_section = best[:10000].strip()
-                else:
-                    print("[DEBUG] All MDA extraction failed, using entire filing text.")
-                    mda_section = content[:10000].strip()
+        # Improved MDA extraction logic
+        mda_section = None
+        # 1. Try regex extraction between known headers
+        mda_match = re.search(r'(item\s*2[\s\S]+?)(item\s*3|item\s*4|item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
+        if not mda_match:
+            mda_match = re.search(r'(item\s*7[\s\S]+?)(item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
+        if mda_match:
+            mda_section = mda_match.group(1).strip()
+            print(f"[DEBUG] Regex section fallback - MDA section (first 500 chars): {mda_section[:500]}")
+        # 2. If regex result is too short or looks like a header, use alpha-ratio fallback
+        if not mda_section or len(mda_section) < 500 or re.match(r'^item \d+management', mda_section.strip().lower()):
+            print("[DEBUG] Regex result too short or only header, using alpha-ratio fallback.")
+            candidates = re.findall(r'([\s\S]{0,10000})', content)
+            best = ''
+            best_alpha = 0
+            for c in candidates:
+                if 'management' in c.lower() and 'discussion' in c.lower():
+                    alpha_ratio = sum(ch.isalpha() for ch in c) / max(1, len(c))
+                    if alpha_ratio > 0.6 and len(c) > len(best):
+                        best = c
+                        best_alpha = alpha_ratio
+            if best and len(best) > 500:
+                mda_section = best.strip()
+                print(f"[DEBUG] Alpha-ratio fallback - MDA section (first 500 chars): {mda_section[:500]}")
+                print(f"[DEBUG] Alpha-ratio fallback - MDA section length: {len(mda_section)} chars, alpha ratio: {best_alpha:.2f}")
+        # 3. If still not found, use large window after header
+        if not mda_section or len(mda_section) < 500:
+            print("[DEBUG] Alpha-ratio fallback failed, using large window after header.")
+            header_match = re.search(r'(item\s*2[^\n\r]*)', content, re.IGNORECASE)
+            if header_match:
+                start = header_match.end()
+                mda_section = content[start:start+10000].strip()
+                print(f"[DEBUG] Large window fallback - MDA section (first 500 chars): {mda_section[:500]}")
+        # 4. If all else fails, use entire filing text (up to 10,000 chars)
+        if not mda_section or len(mda_section) < 500:
+            print("[DEBUG] All MDA extraction failed, using entire filing text.")
+            mda_section = content[:10000].strip()
+            print(f"[DEBUG] Entire filing fallback - MDA section (first 500 chars): {mda_section[:500]}")
 
         def format_number_pair(label, current, previous, always_float=False):
             if current is None and previous is None:
@@ -320,8 +321,8 @@ async def summarize_filing(request: SummarizeRequest):
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract up to 5 full sentences after each table in the MDA section that contain BOTH a keyword and a number
-        def extract_post_table_sentences(mda_html, num_sentences=5):
+        # Improved extraction of driver sentences from MDA
+        def extract_driver_sentences(mda_html, num_sentences=5):
             keywords = [
                 'increase', 'increased', 'decrease', 'decreased',
                 'driven by', 'due to',
@@ -329,53 +330,33 @@ async def summarize_filing(request: SummarizeRequest):
             ]
             soup = BeautifulSoup(mda_html, 'html.parser')
             all_text = soup.get_text(separator=' ', strip=True)
-            # Always extract from the entire MDA section
             sentences = re.split(r'(?<=[.!?])\s+|\n+', all_text)
             relevant = []
-            for s in sentences:
+            for i, s in enumerate(sentences):
                 s_clean = s.strip()
                 has_keyword = any(kw in s_clean.lower() for kw in keywords)
                 has_number = re.search(r'\d', s_clean)
-                print(f"[DEBUG][All MDA] Checking: '{s_clean}' | Keyword: {has_keyword} | Number: {has_number}")
-                if has_keyword and has_number:
-                    relevant.append(s_clean)
+                if has_keyword or has_number:
+                    # If sentence has a number, include previous and next for context
+                    if has_number:
+                        if i > 0:
+                            relevant.append(sentences[i-1].strip())
+                        relevant.append(s_clean)
+                        if i < len(sentences)-1:
+                            relevant.append(sentences[i+1].strip())
+                    else:
+                        relevant.append(s_clean)
                 if len(relevant) >= num_sentences:
                     break
-            # If not enough, fallback to regex and sliding window as before
-            results = relevant
-            if not results:
-                print("[DEBUG][Regex Fallback] No results from sentence split, trying regex chunk extraction.")
-                pattern = r'([^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*?\d+[^.!?\n]*[.!?]|[^.!?\n]*?\d+[^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*[.!?])'
-                matches = re.findall(pattern, all_text, re.IGNORECASE)
-                regex_chunks = []
-                for m in matches:
-                    chunk = m[0].strip() if isinstance(m, tuple) else m.strip()
-                    print(f"[DEBUG][Regex Fallback] Checking chunk: '{chunk}'")
-                    if chunk:
-                        regex_chunks.append(chunk)
-                print(f"[DEBUG][Regex Fallback] Regex-matched chunks: {regex_chunks}")
-                results = regex_chunks[:num_sentences]
-            if not results:
-                print("[DEBUG][Sliding Window Fallback] No results from regex, trying sliding window.")
-                words = all_text.split()
-                window_size = 20
-                for i in range(0, len(words) - window_size + 1):
-                    chunk = ' '.join(words[i:i+window_size])
-                    has_keyword = any(kw in chunk.lower() for kw in keywords)
-                    has_number = re.search(r'\d', chunk)
-                    if has_keyword and has_number:
-                        results.append(chunk)
-                    if len(results) >= num_sentences:
-                        break
-                print(f"[DEBUG][Sliding Window Fallback] Chunks: {results}")
-            else:
-                print(f"[DEBUG][All MDA] Sentences returned: {results}")
-            return results
+            # Remove duplicates and empty strings
+            results = [s for i, s in enumerate(relevant) if s and s not in relevant[:i]]
+            print(f"[DEBUG][Driver Extraction] Sentences returned: {results}")
+            return results[:num_sentences]
 
         def extract_revenue_statements(mda_html):
-            post_table_sentences = extract_post_table_sentences(mda_html, num_sentences=5)
-            print(f"[DEBUG] Extracted revenue sentences for LLM: {post_table_sentences}")
-            return ' '.join(post_table_sentences)
+            driver_sentences = extract_driver_sentences(mda_html, num_sentences=5)
+            print(f"[DEBUG] Extracted driver sentences for LLM: {driver_sentences}")
+            return ' '.join(driver_sentences)
 
         revenue_statements = extract_revenue_statements(mda_section)
 
@@ -405,27 +386,24 @@ async def summarize_filing(request: SummarizeRequest):
         # Add debug print for extracted MDA section
         print(f"[DEBUG] Extracted MDA section (first 500 chars): {mda_section[:500]}")
 
-        # Add company name to the prompt if available
+        # Update the LLM prompt for a more conversational podcast script
         company_intro = f"The company discussed in this filing is {company_name}.\n" if company_name else ""
         prompt = (
             company_intro +
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
-            "For this script, use the following instructions:\n"
-            "1. For the Financial performance section, use the official numbers and ONLY the statements below that contain BOTH a financial keyword (increase, increased, decrease, decreased, driven by, due to, revenue, revenues, sales, business, sector, or segment) AND a number.\n"
-            "- Official numbers:\n"
+            "Write a podcast script as a natural conversation between Alex and Jamie, discussing the latest SEC filing for this company.\n"
+            "- For the financial performance section, use the official numbers and the following sentences from the MDA that mention key drivers (e.g., 'driven by', 'due to', 'increase', 'decrease', etc.).\n"
+            "- Make the conversation engaging and natural. Do not use block quotes or headings like PART 1/PART 2.\n"
+            "- Paraphrase the sentences as needed to fit the flow of the conversation, but keep the facts accurate.\n"
+            "- Do not invent numbers or drivers not present in the extracted sentences.\n"
+            "- Here are the official numbers:\n"
             f"{numbers_section}\n"
-            "- Quote or restate each sentence exactly as written below.\n"
-            "- Do NOT paraphrase, mix, combine, or create new sentences.\n"
-            "- Do NOT use partial sentences.\n"
-            "- Do NOT infer or add information.\n"
+            "- Here are the extracted driver sentences:\n"
             f"{revenue_statements}\n\n"
-            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full section below.\n"
+            "For details, strategic drivers, and risks/opportunities, use the following full section as context:\n"
             f"{mda_section}\n\n"
-            "Create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
-            "1. Financial performance: Summarize revenue changes and their explicit explanations using the official numbers and ONLY the extracted statements above.\n"
-            "2. Details and strategic drivers: Summarize from the full section above.\n"
-            "3. Risks, opportunities, and outlook: Summarize from the full section above.\n"
+            "The script should be 2:30 to 3:30 minutes long, with Alex and Jamie alternating as speakers."
         )
         prompt = remove_mda_mentions(prompt)
 
