@@ -281,11 +281,15 @@ async def summarize_filing(request: SummarizeRequest):
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract only revenue/sales/business/sector/segment/driver-related statements from the MDA section for bullet 1
+        # Extract only the most relevant statements for bullet 1
         def extract_revenue_statements(mda_text):
             import re
             sentences = re.split(r'(?<=[.!?])\s+', mda_text)
-            keywords = ['revenue', 'revenues', 'sales', 'business', 'sector', 'segment', 'driven by', 'due to']
+            keywords = [
+                'increase', 'increased', 'decrease', 'decreased',
+                'driven by', 'due to',
+                'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
+            ]
             relevant = [s for s in sentences if any(kw in s.lower() for kw in keywords)]
             return ' '.join(relevant)
         revenue_statements = extract_revenue_statements(mda_section)
@@ -294,13 +298,15 @@ async def summarize_filing(request: SummarizeRequest):
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             "For this script, use the following:\n"
-            "1. For the Financial performance section, ONLY use the statements below about revenue, sales, business, sector, segment, or containing phrases like 'driven by' or 'due to':\n"
+            "1. For the Financial performance section, ONLY use the statements below that contain increase, increased, decrease, decreased, driven by, due to, revenue, revenues, sales, business, sector, or segment:\n"
             f"{revenue_statements}\n\n"
             "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below:\n"
             f"{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
             "1. Financial performance: Summarize revenue changes and their explicit explanations using ONLY the extracted statements above.\n"
-            "- Quote or restate the main drivers exactly as stated, especially phrases like 'driven by' or 'due to'.\n"
+            "- Quote or restate the main drivers exactly as stated, especially phrases like 'driven by', 'due to', 'increase', 'decrease', 'increased', or 'decreased'.\n"
+            "- If a statement includes a main driver or primary reason (e.g., 'primarily driven by', 'mainly due to'), you must quote or restate that part exactly, and make it the focus of your summary.\n"
+            "- Do not summarize or generalize; always use the same wording and order as in the extracted statement.\n"
             "- Do not infer, generalize, or mention anything not present in the extracted statements.\n"
             "- Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script. "
             "2. Details and strategic drivers: Summarize from the full MDA section above. "
