@@ -296,18 +296,18 @@ async def summarize_filing(request: SummarizeRequest):
                 siblings_checked = 0
                 text_after_table = ''
                 while sibling and siblings_checked < 10:
-                    # Check for <p> and <li> tags within the sibling
                     if hasattr(sibling, 'find_all'):
                         for tag in sibling.find_all(['p', 'li']):
                             text_after_table += ' ' + tag.get_text(separator=' ', strip=True)
-                    # Also add direct text
                     if hasattr(sibling, 'get_text'):
                         text_after_table += ' ' + sibling.get_text(separator=' ', strip=True)
                     elif isinstance(sibling, str):
                         text_after_table += ' ' + sibling.strip()
                     sibling = sibling.next_sibling
                     siblings_checked += 1
+                print(f"[DEBUG] Text after table: {text_after_table}")
                 sentences = re.split(r'(?<=[.!?])\s+', text_after_table)
+                print(f"[DEBUG] Sentences after table: {sentences}")
                 relevant = []
                 for s in sentences:
                     s_clean = s.strip()
@@ -318,7 +318,26 @@ async def summarize_filing(request: SummarizeRequest):
                         relevant.append(s_clean)
                     if len(relevant) >= num_sentences:
                         break
-                results.extend(relevant)
+                results.extend(relevant[:num_sentences])
+            # Fallback: if nothing found after tables, search the whole MDA section for up to num_sentences
+            if not results:
+                print("[DEBUG] No relevant sentences found after tables. Using fallback: search entire MDA section.")
+                all_text = soup.get_text(separator=' ', strip=True)
+                sentences = re.split(r'(?<=[.!?])\s+', all_text)
+                fallback_relevant = []
+                for s in sentences:
+                    s_clean = s.strip()
+                    has_keyword = any(kw in s_clean.lower() for kw in keywords)
+                    has_number = re.search(r'\d', s_clean)
+                    print(f"[DEBUG][Fallback] Checking: '{s_clean}' | Keyword: {has_keyword} | Number: {has_number}")
+                    if has_keyword and has_number:
+                        fallback_relevant.append(s_clean)
+                    if len(fallback_relevant) >= num_sentences:
+                        break
+                results = fallback_relevant
+                print(f"[DEBUG][Fallback] Sentences returned: {results}")
+            else:
+                print(f"[DEBUG] Sentences returned from tables: {results}")
             return results
 
         def extract_revenue_statements(mda_html):
