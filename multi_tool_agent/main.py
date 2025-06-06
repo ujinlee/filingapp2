@@ -444,9 +444,31 @@ async def summarize_filing(request: SummarizeRequest):
         # After LLM output, clean up excessive asterisks
         summary = re.sub(r'\*{2,}', '', summary)
 
+        # After LLM output is generated (assume variable 'transcript' holds the script)
+        def clean_transcript(transcript):
+            transcript = re.sub(r'^(ALEX:)\s*Alex:\s*', r'\1 ', transcript, flags=re.MULTILINE)
+            transcript = re.sub(r'^(JAMIE:)\s*Jamie:\s*', r'\1 ', transcript, flags=re.MULTILINE)
+            return transcript
+        # ...
+        # After you get the LLM output (e.g., 'transcript = ...')
+        transcript = clean_transcript(transcript)
+
+        # Remove stage directions like [Intro Music] before translation and TTS
+        def remove_stage_directions(transcript):
+            lines = transcript.split('\n')
+            filtered = [line for line in lines if not re.match(r'^\s*[A-Z]+:\s*\[.*\]\s*$', line)]
+            return '\n'.join(filtered)
+        transcript = remove_stage_directions(transcript)
+
         # 8. Translate
         try:
-            transcript = TranslationAgent.translate(summary, request.language)
+            # For Korean, ensure currency is spoken as '1.91달러' (number first)
+            def fix_korean_currency(text):
+                # Replace '달러 1.91' or '달러 1,000' with '1.91달러' or '1,000달러'
+                return re.sub(r'달러\s*([\d,.]+)', r'\1달러', text)
+            if request.language.startswith('ko'):
+                transcript = fix_korean_currency(transcript)
+            transcript = TranslationAgent.translate(transcript, request.language)
             # After translation, preserve speaker tags if present, only alternate if missing
             lines = [line for line in transcript.split('\n') if line.strip()]
             normalized_lines = []
