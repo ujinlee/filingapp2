@@ -338,12 +338,18 @@ async def summarize_filing(request: SummarizeRequest):
                         break
                 results = fallback_relevant
                 print(f"[DEBUG][Fallback] Sentences returned: {results}")
-            # 3. If still no results, use regex-based direct extraction
+            # 3. If still no results, use regex-based direct extraction (improved for multiple keywords/numbers)
             if not results:
                 print("[DEBUG][Regex Fallback] No results from sentence split, trying regex chunk extraction.")
-                pattern = r'([^.\n]*?(increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.\n]*?\d+[^.\n]*[.!?])'
+                # Loosened pattern: match any chunk with a keyword and a number, in any order, and allow for commas, $ etc.
+                pattern = r'([^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*?\d+[^.!?\n]*[.!?]|[^.!?\n]*?\d+[^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*[.!?])'
                 matches = re.findall(pattern, all_text, re.IGNORECASE)
-                regex_chunks = [m[0].strip() for m in matches if m[0].strip()]
+                regex_chunks = []
+                for m in matches:
+                    chunk = m[0].strip() if isinstance(m, tuple) else m.strip()
+                    print(f"[DEBUG][Regex Fallback] Checking chunk: '{chunk}'")
+                    if chunk:
+                        regex_chunks.append(chunk)
                 print(f"[DEBUG][Regex Fallback] Regex-matched chunks: {regex_chunks}")
                 results = regex_chunks[:num_sentences]
             # 4. If still no results, use sliding window
