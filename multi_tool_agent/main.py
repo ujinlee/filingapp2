@@ -143,14 +143,71 @@ async def summarize_filing(request: SummarizeRequest):
                 'TotalRevenuesAndOtherIncome',
                 'TopLineRevenue'
             ]
+            
+            # Add segment revenue tags
+            segment_revenue_tags = [
+                'SegmentRevenue',
+                'SegmentRevenues',
+                'SegmentSales',
+                'SegmentNetSales',
+                'SegmentNetRevenue',
+                'SegmentNetRevenues',
+                'SegmentSalesRevenueNet',
+                'SegmentSalesRevenueNetMember',
+                'SegmentSalesRevenueServicesNet',
+                'SegmentSalesRevenueGoodsNet',
+                'SegmentRevenueFromContractWithCustomerExcludingAssessedTax',
+                'SegmentRevenueFromContractWithCustomerMember',
+                'SegmentRevenuesNetOfInterestExpense',
+                'SegmentTotalRevenuesAndOtherIncome',
+                'SegmentTopLineRevenue',
+                # Common segment names
+                'EnergySegmentRevenue',
+                'EnergySegmentRevenues',
+                'EnergySegmentSales',
+                'TechnologySegmentRevenue',
+                'TechnologySegmentRevenues',
+                'TechnologySegmentSales',
+                'FinancialSegmentRevenue',
+                'FinancialSegmentRevenues',
+                'FinancialSegmentSales',
+                'HealthcareSegmentRevenue',
+                'HealthcareSegmentRevenues',
+                'HealthcareSegmentSales',
+                'ConsumerSegmentRevenue',
+                'ConsumerSegmentRevenues',
+                'ConsumerSegmentSales',
+                'IndustrialSegmentRevenue',
+                'IndustrialSegmentRevenues',
+                'IndustrialSegmentSales'
+            ]
+            
             revenue_tags = base_revenue_tags + [f'us-gaap:{tag}' for tag in base_revenue_tags]
+            segment_revenue_tags = segment_revenue_tags + [f'us-gaap:{tag}' for tag in segment_revenue_tags]
+            
+            # Get total revenue
             revenue, revenue_prev = get_latest_and_previous_value(revenue_tags, pick_largest=True, debug_label='Revenue')
+            
+            # Get segment revenues
+            segment_revenues = {}
+            for tag in segment_revenue_tags:
+                if tag in xbrl_facts and xbrl_facts[tag]:
+                    current, previous = get_latest_and_previous_value([tag], debug_label=f'Segment Revenue - {tag}')
+                    if current is not None:
+                        segment_name = tag.replace('SegmentRevenue', '').replace('SegmentRevenues', '').replace('SegmentSales', '')
+                        if not segment_name:
+                            segment_name = 'Unnamed Segment'
+                        segment_revenues[segment_name] = {
+                            'current': current,
+                            'previous': previous
+                        }
+            
             net_income, net_income_prev = get_latest_and_previous_value(['NetIncomeLoss'], debug_label='Net Income')
             eps, eps_prev = get_latest_and_previous_value(['EarningsPerShareBasic'], debug_label='EPS')
+            
             print(f"[XBRL] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
             print(f"[XBRL] Previous values: Revenue={revenue_prev}, Net Income={net_income_prev}, EPS={eps_prev}")
-            # Remove debug: Print all values for each revenue-related tag
-            # (No code here)
+            print(f"[XBRL] Segment revenues: {segment_revenues}")
         except Exception as e:
             print("[ERROR] Exception in XBRL extraction:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"XBRL extraction failed: {str(e)}")
@@ -209,6 +266,14 @@ async def summarize_filing(request: SummarizeRequest):
         numbers_section = ""
         if is_valid_number(revenue):
             numbers_section += format_number_pair("Revenue", revenue, revenue_prev)
+            
+        # Add segment revenues to numbers section
+        if segment_revenues:
+            numbers_section += "\nSegment Revenues:\n"
+            for segment, values in segment_revenues.items():
+                if is_valid_number(values['current']):
+                    numbers_section += format_number_pair(f"{segment} Revenue", values['current'], values['previous'])
+            
         if is_valid_number(net_income):
             numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
         if is_valid_number(eps):
@@ -216,23 +281,35 @@ async def summarize_filing(request: SummarizeRequest):
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
+        # Extract only revenue/sales/business/sector-related statements from the MDA section for bullet 1
+        def extract_revenue_statements(mda_text):
+            sentences = re.split(r'(?<=[.!?])\s+', mda_text)
+            keywords = ['revenue', 'revenues', 'sales', 'business', 'sector']
+            relevant = [s for s in sentences if any(kw in s.lower() for kw in keywords)]
+            return ' '.join(relevant)
+        revenue_statements = extract_revenue_statements(mda_section)
+
         prompt = (
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
-            f"Here is the relevant section from the filing:\n\n{mda_section}\n\n"
-            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
-
+            "For this script, use the following:\n"
+            "1. For the Financial performance section, ONLY use the statements below about revenue, sales, business, or sector:\n"
+            f"{revenue_statements}\n\n"
+            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below:\n"
+            f"{mda_section}\n\n"
+            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
             "1. Financial performance: Focus on revenue changes and their explicit explanations. "
             "- First, state the official revenue numbers for the current and previous period that are provided below. "
-            "- Then, extract and quote or restate ONLY the explicit explanations for revenue changes that are stated in the text above. "
-            "- If business segments are mentioned as drivers of revenue changes, quote or restate exactly how they contributed, using the same wording as in the filing. "
+            "- Then, extract and quote or restate ONLY the explicit explanations for revenue changes that are stated in the statements above. "
+            "- If business segments are mentioned as drivers of revenue changes, quote or restate exactly how they contributed, using the same wording as in the statements above. "
+            "- Do not mention or discuss any business segment unless it is explicitly named and discussed in the statements above. If a segment is not mentioned in the statements above, do not refer to it at all. "
+            "- When discussing any segment, only quote or restate what is explicitly stated in the statements above, using the same wording and numbers. "
+            "- Never infer, summarize, or generalize about any segment or reason for revenue change. "
             "- If no explicit reasons for revenue changes are stated, simply mention the revenue change without speculating about causes. "
-            "- Do not make up, infer, or speculate about reasons for revenue changes. Only use explanations that are explicitly stated in the text. "
-            "- Focus on sections titled 'overview', 'performance', 'revenue', 'sales', or similar headings. "
-            "- IMPORTANT: Do not mention 'MD&A', 'Management's Discussion and Analysis', or similar terms in the script. "
-            "- When stating whether the number increased or decreased, always check the numbers provided below and ensure your statement matches the actual change. If the numbers show an increase, do not say it decreased, and vice versa. "
-            "2. Details and strategic drivers: Discuss what drove the numbers, management commentary, business segments, etc. from the section above. "
-            "3. Risks, opportunities, and outlook: Cover forward-looking statements, risk factors, and opportunities from the section above. "
+            "- Do not make up, infer, or speculate about reasons for revenue changes. Only use explanations that are explicitly stated in the statements above. "
+            "- When stating whether revenue increased or decreased, always check the numbers provided below and ensure your statement matches the actual change. If the numbers show an increase, do not say it decreased, and vice versa. "
+            "2. Details and strategic drivers: Summarize from the full MDA section above. "
+            "3. Risks, opportunities, and outlook: Summarize from the full MDA section above. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
             "Do not use any other speaker names or formats. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
