@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import re
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
@@ -19,9 +20,9 @@ app.add_middleware(
         "http://localhost:3000",  # local React dev
         "https://front2.vercel.app",  # old Vercel frontend
         "https://front2-zeta.vercel.app",  # new Vercel frontend
-        "https://filingapp.onrender.com",
-        "https://filingtalk.com",
-        "https://www.filingtalk.com"
+        "https://filingapp.onrender.com"
+        # "https://filingtalk.com",
+        # "https://www.filingtalk.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -277,49 +278,97 @@ async def summarize_filing(request: SummarizeRequest):
         if is_valid_number(net_income):
             numbers_section += format_number_pair("Net Income", net_income, net_income_prev)
         if is_valid_number(eps):
-            numbers_section += format_number_pair("EPS", eps, eps_prev, always_float=True)
+            numbers_section += format_number_pair("Earnings per Share", eps, eps_prev, always_float=True)
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract relevant sentences from the entire MDA section for bullet 1
-        def extract_revenue_statements(mda_text):
-            import re
-            sentences = re.split(r'(?<=[.!?])\s+', mda_text)
+        # Extract up to 5 full sentences after each table in the MDA section that contain BOTH a keyword and a number
+        def extract_post_table_sentences(mda_html, num_sentences=5):
             keywords = [
                 'increase', 'increased', 'decrease', 'decreased',
                 'driven by', 'due to',
                 'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
             ]
-            relevant = [s.strip() for s in sentences if any(kw in s.lower() for kw in keywords)]
-            return ' '.join(relevant)
+            soup = BeautifulSoup(mda_html, 'html.parser')
+            all_text = soup.get_text(separator=' ', strip=True)
+            # Always extract from the entire MDA section
+            sentences = re.split(r'(?<=[.!?])\s+|\n+', all_text)
+            relevant = []
+            for s in sentences:
+                s_clean = s.strip()
+                has_keyword = any(kw in s_clean.lower() for kw in keywords)
+                has_number = re.search(r'\d', s_clean)
+                print(f"[DEBUG][All MDA] Checking: '{s_clean}' | Keyword: {has_keyword} | Number: {has_number}")
+                if has_keyword and has_number:
+                    relevant.append(s_clean)
+                if len(relevant) >= num_sentences:
+                    break
+            # If not enough, fallback to regex and sliding window as before
+            results = relevant
+            if not results:
+                print("[DEBUG][Regex Fallback] No results from sentence split, trying regex chunk extraction.")
+                pattern = r'([^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*?\d+[^.!?\n]*[.!?]|[^.!?\n]*?\d+[^.!?\n]*?(?:increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.!?\n]*[.!?])'
+                matches = re.findall(pattern, all_text, re.IGNORECASE)
+                regex_chunks = []
+                for m in matches:
+                    chunk = m[0].strip() if isinstance(m, tuple) else m.strip()
+                    print(f"[DEBUG][Regex Fallback] Checking chunk: '{chunk}'")
+                    if chunk:
+                        regex_chunks.append(chunk)
+                print(f"[DEBUG][Regex Fallback] Regex-matched chunks: {regex_chunks}")
+                results = regex_chunks[:num_sentences]
+            if not results:
+                print("[DEBUG][Sliding Window Fallback] No results from regex, trying sliding window.")
+                words = all_text.split()
+                window_size = 20
+                for i in range(0, len(words) - window_size + 1):
+                    chunk = ' '.join(words[i:i+window_size])
+                    has_keyword = any(kw in chunk.lower() for kw in keywords)
+                    has_number = re.search(r'\d', chunk)
+                    if has_keyword and has_number:
+                        results.append(chunk)
+                    if len(results) >= num_sentences:
+                        break
+                print(f"[DEBUG][Sliding Window Fallback] Chunks: {results}")
+            else:
+                print(f"[DEBUG][All MDA] Sentences returned: {results}")
+            return results
+
+        def extract_revenue_statements(mda_html):
+            post_table_sentences = extract_post_table_sentences(mda_html, num_sentences=5)
+            print(f"[DEBUG] Extracted revenue sentences for LLM: {post_table_sentences}")
+            return ' '.join(post_table_sentences)
+
         revenue_statements = extract_revenue_statements(mda_section)
+
+        # Remove any mention of MDA, MD&A, or Management's Discussion and Analysis from the script
+        def remove_mda_mentions(text):
+            patterns = [
+                r'MD&A', r'MDA', r'Management\'?s? Discussion and Analysis',
+                r'md&a', r'mda', r'management\'?s? discussion and analysis'
+            ]
+            for pat in patterns:
+                text = re.sub(pat, '', text, flags=re.IGNORECASE)
+            return text
 
         prompt = (
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
-            "For this script, use the following:\n"
-            "1. For the Financial performance section, ONLY use the statements below that contain increase, increased, decrease, decreased, driven by, due to, revenue, revenues, sales, business, sector, or segment:\n"
+            "For this script, use the following instructions:\n"
+            "1. For the Financial performance section, ONLY use the statements below that contain BOTH a financial keyword (increase, increased, decrease, decreased, driven by, due to, revenue, revenues, sales, business, sector, or segment) AND a number.\n"
+            "- Quote or restate each sentence exactly as written below.\n"
+            "- Do NOT paraphrase, mix, combine, or create new sentences.\n"
+            "- Do NOT use partial sentences.\n"
+            "- Do NOT infer or add information.\n"
             f"{revenue_statements}\n\n"
-            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below:\n"
+            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full section below.\n"
             f"{mda_section}\n\n"
-            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
+            "Create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
             "1. Financial performance: Summarize revenue changes and their explicit explanations using ONLY the extracted statements above.\n"
-            "- If a sentence contains both the numbers and the direction (increase/decrease) and the main driver (e.g., 'primarily driven by'), quote the entire sentence exactly as written. Do not paraphrase, summarize, or create a new sentence. Only use the exact sentence from the extracted statements.\n"
-            "- Quote or restate the main drivers exactly as stated, especially phrases like 'driven by', 'due to', 'increase', 'decrease', 'increased', or 'decreased'.\n"
-            "- If a statement includes a main driver or primary reason (e.g., 'primarily driven by', 'mainly due to'), you must quote or restate that part exactly, and make it the focus of your summary.\n"
-            "- Do not summarize or generalize; always use the same wording and order as in the extracted statement.\n"
-            "- Do not create new sentences based on the extracted statements. Only quote or restate the extracted sentences exactly as written. Summarize only by selecting, quoting, or restating, not by rewording or combining.\n"
-            "- Do not infer, generalize, or mention anything not present in the extracted statements.\n"
-            "- Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script. "
-            "2. Details and strategic drivers: Summarize from the full MDA section above. "
-            "3. Risks, opportunities, and outlook: Summarize from the full MDA section above. "
-            "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
-            "Do not use any other speaker names or formats. "
-            "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
-            f"Official numbers for the current and previous period:\n"
-            f"{numbers_section}\n"
-            "Begin the podcast script now.\n\n"
+            "2. Details and strategic drivers: Summarize from the full section above.\n"
+            "3. Risks, opportunities, and outlook: Summarize from the full section above.\n"
         )
+        prompt = remove_mda_mentions(prompt)
 
         # 7. Summarize
         request_options = {
@@ -408,4 +457,5 @@ async def summarize_filing(request: SummarizeRequest):
     except Exception as e:
         import traceback
         print("[ERROR] Unhandled exception in /api/summarize:", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
