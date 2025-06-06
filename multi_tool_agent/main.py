@@ -291,6 +291,7 @@ async def summarize_filing(request: SummarizeRequest):
             ]
             soup = BeautifulSoup(mda_html, 'html.parser')
             results = []
+            # 1. Try standard sentence splitting after tables
             for table in soup.find_all('table'):
                 sibling = table.next_sibling
                 siblings_checked = 0
@@ -306,7 +307,7 @@ async def summarize_filing(request: SummarizeRequest):
                     sibling = sibling.next_sibling
                     siblings_checked += 1
                 print(f"[DEBUG] Text after table: {text_after_table}")
-                sentences = re.split(r'(?<=[.!?])\s+', text_after_table)
+                sentences = re.split(r'(?<=[.!?])\s+|\n+', text_after_table)
                 print(f"[DEBUG] Sentences after table: {sentences}")
                 relevant = []
                 for s in sentences:
@@ -319,11 +320,12 @@ async def summarize_filing(request: SummarizeRequest):
                     if len(relevant) >= num_sentences:
                         break
                 results.extend(relevant[:num_sentences])
-            # Fallback: if nothing found after tables, search the whole MDA section for up to num_sentences
+            # 2. Fallback: if nothing found after tables, search the whole MDA section for up to num_sentences
             if not results:
                 print("[DEBUG] No relevant sentences found after tables. Using fallback: search entire MDA section.")
                 all_text = soup.get_text(separator=' ', strip=True)
-                sentences = re.split(r'(?<=[.!?])\s+', all_text)
+                # Try standard sentence split
+                sentences = re.split(r'(?<=[.!?])\s+|\n+', all_text)
                 fallback_relevant = []
                 for s in sentences:
                     s_clean = s.strip()
@@ -336,8 +338,30 @@ async def summarize_filing(request: SummarizeRequest):
                         break
                 results = fallback_relevant
                 print(f"[DEBUG][Fallback] Sentences returned: {results}")
+            # 3. If still no results, use regex-based direct extraction
+            if not results:
+                print("[DEBUG][Regex Fallback] No results from sentence split, trying regex chunk extraction.")
+                pattern = r'([^.\n]*?(increase|decrease|revenue|revenues|sales|segment|driven by|due to)[^.\n]*?\d+[^.\n]*[.!?])'
+                matches = re.findall(pattern, all_text, re.IGNORECASE)
+                regex_chunks = [m[0].strip() for m in matches if m[0].strip()]
+                print(f"[DEBUG][Regex Fallback] Regex-matched chunks: {regex_chunks}")
+                results = regex_chunks[:num_sentences]
+            # 4. If still no results, use sliding window
+            if not results:
+                print("[DEBUG][Sliding Window Fallback] No results from regex, trying sliding window.")
+                words = all_text.split()
+                window_size = 20
+                for i in range(0, len(words) - window_size + 1):
+                    chunk = ' '.join(words[i:i+window_size])
+                    has_keyword = any(kw in chunk.lower() for kw in keywords)
+                    has_number = re.search(r'\d', chunk)
+                    if has_keyword and has_number:
+                        results.append(chunk)
+                    if len(results) >= num_sentences:
+                        break
+                print(f"[DEBUG][Sliding Window Fallback] Chunks: {results}")
             else:
-                print(f"[DEBUG] Sentences returned from tables: {results}")
+                print(f"[DEBUG] Sentences returned from tables or fallback: {results}")
             return results
 
         def extract_revenue_statements(mda_html):
