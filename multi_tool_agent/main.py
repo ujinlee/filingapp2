@@ -1,7 +1,11 @@
+import os
+AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
+os.makedirs(AUDIO_DIR, exist_ok=True)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from multi_tool_agent.agent import SECAgent, SummarizationAgent, TranslationAgent, TTSAgent, AUDIO_DIR, extract_xbrl_facts_with_arelle
+from multi_tool_agent.agent import SECAgent, SummarizationAgent, TranslationAgent, TTSAgent, extract_xbrl_facts_with_arelle
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
