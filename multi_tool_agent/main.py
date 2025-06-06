@@ -408,4 +408,5 @@ async def summarize_filing(request: SummarizeRequest):
     except Exception as e:
         import traceback
         print("[ERROR] Unhandled exception in /api/summarize:", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
