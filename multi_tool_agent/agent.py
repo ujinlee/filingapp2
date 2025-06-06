@@ -245,7 +245,7 @@ class SummarizationAgent:
         start_time = time.time()
         # Directly send the prompt (already constructed in main.py) to the LLM
         response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a financial analyst."},
                 {"role": "user", "content": financial_context}
@@ -625,7 +625,7 @@ class TranslationAgent:
                 )
             print(f"[TranslationAgent] Starting translation for {target_language}.")
             response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": f"You are a professional translator to {target_language}. Always preserve the speaker tags (ALEX: and JAMIE:) exactly as they appear. Translate the entire script, do not skip any part."},
                     {"role": "user", "content": prompt}
