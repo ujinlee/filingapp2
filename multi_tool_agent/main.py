@@ -245,13 +245,22 @@ async def summarize_filing(request: SummarizeRequest):
         # Improved MDA fallback extraction
         if not mda_section or len(mda_section) < 500 or mda_section == "[MDA section not found in filing.]" or re.match(r'^item \d+management', mda_section.strip().lower()):
             print("[DEBUG] MDA extraction too short or only header, using improved fallback.")
-            # Try to extract between Item 2 and Item 3 (or Item 7 and Item 7A/8)
-            mda_match = re.search(r'(item\s*2[\s\S]+?)(item\s*3|item\s*4|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
+            # Try to extract between Item 2 and Item 3 (or Item 7 and Item 7A/8), with broader regex
+            mda_match = re.search(r'(item\s*2[\s\S]+?)(item\s*3|item\s*4|item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
             if not mda_match:
-                mda_match = re.search(r'(item\s*7[\s\S]+?)(item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
+                mda_match = re.search(r'(item\s*7[\s\S]+?)(item\s*7a|item\s*8|item\s*3|item\s*4|quantitative and qualitative disclosures|controls and procedures)', content, re.IGNORECASE)
             if mda_match:
                 mda_section = mda_match.group(1).strip()
                 print(f"[DEBUG] Regex section fallback - MDA section length: {len(mda_section)} characters")
+                print(f"[DEBUG] Regex section fallback - MDA section (full): {mda_section}")
+                # If still only header, try to extract a large window after the header
+                if len(mda_section) < 500 or re.match(r'^item \d+management', mda_section.strip().lower()):
+                    print("[DEBUG] Regex fallback only found header, extracting large window after header.")
+                    header_match = re.search(r'(item\s*2|item\s*7)', content, re.IGNORECASE)
+                    if header_match:
+                        start_idx = header_match.start()
+                        mda_section = content[start_idx:start_idx+10000].strip()
+                        print(f"[DEBUG] Large window fallback - MDA section (first 500 chars): {mda_section[:500]}")
             else:
                 print("[DEBUG] Regex section fallback failed, using alpha-ratio filter fallback.")
                 candidates = re.findall(r'([\s\S]{0,10000})', content)
