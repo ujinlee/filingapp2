@@ -276,15 +276,20 @@ async def summarize_filing(request: SummarizeRequest):
                 return str(n)
 
         # 6. Build the LLM prompt with both numbers and MDA
+        def format_comparison(current, previous, label):
+            if current and previous and current.get('value') and previous.get('value'):
+                return f"{label}: {humanize_large_number(current['value'])} (prior: {humanize_large_number(previous['value'])})"
+            elif current and current.get('value'):
+                return f"{label}: {current['value']}"
+            else:
+                return f"{label}: (not available)"
+
         numbers_section = ""
-        if revenue:
-            numbers_section += f"Revenue: {humanize_large_number(revenue)}\n"
-        if net_income:
-            numbers_section += f"Net Income: {humanize_large_number(net_income)}\n"
-        if eps:
-            numbers_section += f"EPS: {eps}\n"
-        if not numbers_section:
-            numbers_section = "(No official numbers were found for this period.)\n"
+        numbers_section += format_comparison(revenue, previous_revenue, "Revenue") + "\n"
+        numbers_section += format_comparison(net_income, previous_net_income, "Net Income") + "\n"
+        numbers_section += format_comparison(eps, previous_eps, "EPS") + "\n"
+        if not revenue or not revenue.get('value'):
+            numbers_section += "(No official numbers were found for this period.)\n"
 
         # Extract financial highlights from MDA if present
         financial_highlights = ""
@@ -299,15 +304,15 @@ async def summarize_filing(request: SummarizeRequest):
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
             f"Here is the MDA section from the filing:\n\n{mda_section}\n\n"
             "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts: "
-            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL). "
+            "1. Financial performance (summarize the key numbers and results using only the official numbers provided below from Arelle/XBRL, and compare the current period to the prior period if both are available. Highlight quarter-over-quarter or year-over-year changes in revenue, net income, and EPS). "
             "2. Details and strategic drivers (discuss what drove the numbers, management commentary, business segments, etc. from the MDA). "
             "3. Risks, opportunities, and outlook (cover forward-looking statements, risk factors, and opportunities from the MDA). "
             "The script must be engaging and insightful, weaving together numbers and narrative. Do not invent or guess any details not present in the text. If you are unsure, omit the detail. "
             "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Do not use any other speaker names or formats. "
             "Alternate lines between ALEX and JAMIE for a natural conversation, always starting with ALEX. "
-            "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, or management commentary by name or description. Just incorporate the insights naturally, as if you are discussing the company's performance and outlook. "
+            "Do NOT mention or refer to the MDA section, Management's Discussion and Analysis, MD&A, or management commentary by name or description. If you see such phrases, REMOVE them. Refer to 'the filing' or 'the company' instead. "
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
-            f"Official numbers for the period:\n"
+            f"Official numbers for the period (with prior period comparison if available):\n"
             f"{numbers_section}\n"
             f"Financial highlights from the MDA section:\n"
             f"{financial_highlights}\n"
@@ -346,6 +351,8 @@ async def summarize_filing(request: SummarizeRequest):
 
         # After LLM output, post-process to remove 'Customer A', 'Customer B', etc.
         summary = re.sub(r'Customer [A-Z](,| and)?', 'a major customer', summary)
+        # Remove any mention of MDA, MD&A, Management's Discussion, etc.
+        summary = re.sub(r'(MDA|MD&A|Management[’'`s ]*Discussion[^.,;:]*)( section| says| states| reports| notes| indicates| reveals| highlights)?', 'the filing', summary, flags=re.IGNORECASE)
 
         # 8. Translate
         try:
