@@ -300,12 +300,38 @@ class SummarizationAgent:
                         print("[extract_mda_from_filing_summary] No MDA heading found.")
                         return None
                     mda_text = ""
+                    print(f"[DEBUG] MDA header found: {mda_header.get_text(strip=True)}")
+                    print(f"[DEBUG] Number of siblings after header: {len(list(mda_header.find_next_siblings()))}")
                     for sibling in mda_header.find_next_siblings():
                         sibling_text = sibling.get_text(separator=" ", strip=True)
-                        if re.search(r"item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures", sibling_text, re.I):
+                        print(f"[DEBUG] Sibling text length: {len(sibling_text)}, First 100 chars: {sibling_text[:100]}")
+                        # Check for end markers in both the current sibling and its children
+                        end_markers = [
+                            r"item\s*7a", r"item\s*8", 
+                            r"quantitative and qualitative disclosures",
+                            r"controls and procedures",
+                            r"financial statements",
+                            r"item\s*9",
+                            r"item\s*10"
+                        ]
+                        has_end_marker = any(re.search(pat, sibling_text, re.I) for pat in end_markers)
+                        # Also check children for end markers
+                        for child in sibling.find_all():
+                            child_text = child.get_text(separator=" ", strip=True)
+                            if any(re.search(pat, child_text, re.I) for pat in end_markers):
+                                has_end_marker = True
+                                break
+                        if has_end_marker:
+                            print("[DEBUG] Found end marker, stopping extraction")
                             break
                         mda_text += sibling_text + " "
                     mda_text = mda_text.strip()
+                    print(f"[DEBUG] Total MDA section length: {len(mda_text)} characters")
+                    print(f"[DEBUG] MDA section word count: {len(mda_text.split())} words")
+                    # Verify we have substantial content
+                    if len(mda_text) < 1000:
+                        print("[DEBUG] Extracted MDA text is too short, might be incomplete")
+                        continue
                     print(f"[extract_mda_from_filing_summary] Extracted MDA narrative (first 500 chars): {mda_text[:500]}")
                     return mda_text if mda_text else None
         except Exception as e:
@@ -343,9 +369,13 @@ class SummarizationAgent:
                         break
             if mda_header:
                 mda_text = ""
+                print(f"[DEBUG] MDA header found in HTML: {mda_header.get_text(strip=True)}")
+                print(f"[DEBUG] Number of siblings after header: {len(list(mda_header.find_next_siblings()))}")
                 for sibling in mda_header.find_next_siblings():
                     sibling_text = sibling.get_text(separator=" ", strip=True)
+                    print(f"[DEBUG] Sibling text length: {len(sibling_text)}, First 100 chars: {sibling_text[:100]}")
                     if re.search(r"item\s*7a|item\s*8|quantitative and qualitative disclosures|controls and procedures", sibling_text, re.I):
+                        print("[DEBUG] Found end marker, stopping extraction")
                         break
                     mda_text += sibling_text + " "
                 mda_text = mda_text.strip()
@@ -390,6 +420,8 @@ class SummarizationAgent:
                     mda_end = match.start()
                     break
             mda_section = mda_text[:mda_end].strip()
+            print(f"[DEBUG] Regex fallback - MDA section length: {len(mda_section)} characters")
+            print(f"[DEBUG] Regex fallback - MDA section word count: {len(mda_section.split())} words")
             print(f"[extract_mda_section] Extracted MDA section from text (first 500 chars): {mda_section[:500]}")
             return mda_section
         # Fallback: extract content between 'Item 7' or 'Item 2' and next major item if previous methods fail
@@ -413,6 +445,8 @@ class SummarizationAgent:
                     mda_end = len(text)
                 mda_section = text[start_idx:mda_end].strip()
                 if len(mda_section) > 1000:
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section length: {len(mda_section)} characters")
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section word count: {len(mda_section.split())} words")
                     print(f"[extract_mda_section] Fallback: Extracted between Item 7 and next Item 7A/8 (first 500 chars): {mda_section[:500]}")
                     return mda_section
             # If Item 7 not found, try Item 2
@@ -432,6 +466,8 @@ class SummarizationAgent:
                     mda_end = len(text)
                 mda_section = text[start_idx:mda_end].strip()
                 if len(mda_section) > 1000:
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section length: {len(mda_section)} characters")
+                    print(f"[DEBUG] Item 7/2 fallback - MDA section word count: {len(mda_section.split())} words")
                     print(f"[extract_mda_section] Fallback: Extracted between Item 2 and next Item 3/4 (first 500 chars): {mda_section[:500]}")
                     return mda_section
         except Exception as e:
@@ -443,6 +479,8 @@ class SummarizationAgent:
             if 'management' in c.lower() and 'discussion' in c.lower() and len(c) > len(best):
                 best = c
         if best:
+            print(f"[DEBUG] Final fallback - MDA section length: {len(best)} characters")
+            print(f"[DEBUG] Final fallback - MDA section word count: {len(best.split())} words")
             print(f"[extract_mda_section] FINAL fallback: longest section with 'management' and 'discussion' (first 500 chars): {best[:500]}")
             return best[:10000].strip()
         print("[extract_mda_section] MDA section not found in HTML or text.")
