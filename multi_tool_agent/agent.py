@@ -136,6 +136,8 @@ class SECAgent:
             response = sec_get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
+            entity_name = data.get('name', None)
+            print(f"[DEBUG] Extracted entity/company name from SEC: {entity_name}")
             forms = data.get("filings", {}).get("recent", {})
             filings = []
             for form, date, accession, doc in zip(

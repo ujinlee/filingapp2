@@ -64,7 +64,7 @@ async def summarize_filing(request: SummarizeRequest):
             print("[ERROR] Exception fetching filing index page:", traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Failed to fetch filing index page: {str(e)}")
 
-        # 2. Extract official numbers from Arelle/XBRL using the raw HTML index page
+        # 2. Extract official Ts from Arelle/XBRL using the raw HTML index page
         try:
             xbrl_facts = extract_xbrl_facts_with_arelle(request.documentUrl)
             # Remove or comment out verbose debug prints
