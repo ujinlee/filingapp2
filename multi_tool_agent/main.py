@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import re
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
@@ -281,40 +282,66 @@ async def summarize_filing(request: SummarizeRequest):
         if not numbers_section:
             numbers_section = "(No official numbers were found for this period.)\n"
 
-        # Extract relevant sentences from the entire MDA section for bullet 1
-        def extract_revenue_statements(mda_text):
-            import re
-            sentences = re.split(r'(?<=[.!?])\s+', mda_text)
+        # Extract up to 5 full sentences after each table in the MDA section that contain BOTH a keyword and a number
+        def extract_post_table_sentences(mda_html, num_sentences=5):
             keywords = [
                 'increase', 'increased', 'decrease', 'decreased',
                 'driven by', 'due to',
                 'revenue', 'revenues', 'sales', 'business', 'sector', 'segment'
             ]
-            relevant = [s.strip() for s in sentences if any(kw in s.lower() for kw in keywords)]
-            return ' '.join(relevant)
+            number_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|trillion))?'
+            soup = BeautifulSoup(mda_html, 'html.parser')
+            results = []
+            for table in soup.find_all('table'):
+                sibling = table.next_sibling
+                text_after_table = ''
+                siblings_checked = 0
+                while sibling and siblings_checked < 3:
+                    if hasattr(sibling, 'get_text'):
+                        text_after_table += ' ' + sibling.get_text(separator=' ', strip=True)
+                    elif isinstance(sibling, str):
+                        text_after_table += ' ' + sibling.strip()
+                    sibling = sibling.next_sibling
+                    siblings_checked += 1
+                sentences = re.split(r'(?<=[.!?])\s+', text_after_table)
+                relevant = []
+                for s in sentences:
+                    s_clean = s.strip()
+                    has_keyword = any(kw in s_clean.lower() for kw in keywords)
+                    has_number = re.search(number_pattern, s_clean)
+                    if has_keyword and has_number:
+                        relevant.append(s_clean)
+                    if len(relevant) >= num_sentences:
+                        break
+                results.extend(relevant)
+            return results
+
+        def extract_revenue_statements(mda_html):
+            post_table_sentences = extract_post_table_sentences(mda_html, num_sentences=5)
+            print(f"[DEBUG] Extracted revenue sentences for LLM: {post_table_sentences}")
+            return ' '.join(post_table_sentences)
+
         revenue_statements = extract_revenue_statements(mda_section)
 
         prompt = (
             "Welcome to Filing Talk, the podcast where we break down the latest SEC filings. "
             "(IMPORTANT: Always say 'Filing Talk' in English, do not translate it, even in other languages.)\n\n"
-            "For this script, use the following:\n"
-            "1. For the Financial performance section, ONLY use the statements below that contain increase, increased, decrease, decreased, driven by, due to, revenue, revenues, sales, business, sector, or segment:\n"
+            "For this script, use the following instructions:\n"
+            "1. For the Financial performance section, ONLY use the statements below that contain BOTH a financial keyword (increase, increased, decrease, decreased, driven by, due to, revenue, revenues, sales, business, sector, or segment) AND a number.\n"
+            "- Quote or restate each sentence exactly as written below.\n"
+            "- Do NOT paraphrase, mix, combine, or create new sentences.\n"
+            "- Do NOT use partial sentences.\n"
+            "- Do NOT infer or add information.\n"
+            "- Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script.\n"
             f"{revenue_statements}\n\n"
-            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below:\n"
+            "2. For the Details and strategic drivers and Risks, opportunities, and outlook sections, use the full MDA section below.\n"
             f"{mda_section}\n\n"
-            "Please create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
+            "Create a podcast-style script (with Alex and Jamie) that is 2:30 to 3:30 minutes long, structured in three parts:\n"
             "1. Financial performance: Summarize revenue changes and their explicit explanations using ONLY the extracted statements above.\n"
-            "- If a sentence contains both the numbers and the direction (increase/decrease) and the main driver (e.g., 'primarily driven by'), quote the entire sentence exactly as written. Do not paraphrase, summarize, or create a new sentence. Only use the exact sentence from the extracted statements.\n"
-            "- Quote or restate the main drivers exactly as stated, especially phrases like 'driven by', 'due to', 'increase', 'decrease', 'increased', or 'decreased'.\n"
-            "- If a statement includes a main driver or primary reason (e.g., 'primarily driven by', 'mainly due to'), you must quote or restate that part exactly, and make it the focus of your summary.\n"
-            "- Do not summarize or generalize; always use the same wording and order as in the extracted statement.\n"
-            "- Do not create new sentences based on the extracted statements. Only quote or restate the extracted sentences exactly as written. Summarize only by selecting, quoting, or restating, not by rewording or combining.\n"
-            "- Do not infer, generalize, or mention anything not present in the extracted statements.\n"
-            "- Do not mention 'MD&A', 'MDA', 'Management's Discussion and Analysis', or similar terms in the script. "
-            "2. Details and strategic drivers: Summarize from the full MDA section above. "
-            "3. Risks, opportunities, and outlook: Summarize from the full MDA section above. "
-            "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX. "
-            "Do not use any other speaker names or formats. "
+            "2. Details and strategic drivers: Summarize from the full MDA section above.\n"
+            "3. Risks, opportunities, and outlook: Summarize from the full MDA section above.\n"
+            "Each line of dialogue must start with either 'ALEX:' or 'JAMIE:' (all caps, followed by a colon, no extra spaces). Alternate lines between ALEX and JAMIE, always starting with ALEX.\n"
+            "Do not use any other speaker names or formats.\n"
             "Make the discussion engaging, thorough, and human-like, focusing on what drove the numbers, company strategy, risks, and any forward-looking statements.\n\n"
             f"Official numbers for the current and previous period:\n"
             f"{numbers_section}\n"
