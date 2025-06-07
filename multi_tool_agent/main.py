@@ -521,17 +521,14 @@ async def summarize_filing(request: SummarizeRequest):
                 if request.language.startswith('ko'):
                     transcript = fix_korean_currency(transcript)
                 transcript = TranslationAgent.translate(transcript, request.language)
-                # Clean transcript again after translation to remove any reintroduced names
-                transcript = clean_transcript(transcript)
-                # Normalize speaker tags: ensure every line starts with a single, correct tag
+                # After translation, enforce strict alternation of speaker tags, always starting with ALEX, by stripping all tags and reassigning
                 lines = [line for line in transcript.split('\n') if line.strip()]
                 normalized_lines = []
+                speakers = ['ALEX', 'JAMIE']
                 for i, line in enumerate(lines):
-                    if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
-                        normalized_lines.append(line.strip())
-                    else:
-                        tag = 'ALEX:' if i % 2 == 0 else 'JAMIE:'
-                        normalized_lines.append(f"{tag} {line.strip()}")
+                    # Remove any existing speaker tag
+                    content = re.sub(r'^(ALEX:|JAMIE:)', '', line, flags=re.IGNORECASE).strip()
+                    normalized_lines.append(f"{speakers[i % 2]}: {content}")
                 transcript = '\n'.join(normalized_lines)
                 # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
                 if request.language.startswith('ko'):
