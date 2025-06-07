@@ -447,7 +447,7 @@ async def summarize_filing(request: SummarizeRequest):
         # After LLM output is generated (assume variable 'transcript' holds the script)
         def clean_transcript(transcript):
             # Remove any 'Alex:' or 'Jamie:' after any speaker tag at the start of the line
-            transcript = re.sub(r'^(ALEX:|JAMIE:)\s*(Alex:|Jamie:)\s*', r'\1 ', transcript, flags=re.MULTILINE)
+            transcript = re.sub(r'^(ALEX:|JAMIE:)\s*(Alex:|Jamie:)?\s*', r'\1 ', transcript, flags=re.MULTILINE)
             # Remove self-introductions at the start of the line after the speaker tag
             pattern_alex = (
                 r"^(ALEX:)\s*"
@@ -479,7 +479,18 @@ async def summarize_filing(request: SummarizeRequest):
             transcript = re.sub(r'^(ALEX:|JAMIE:)\s*\[.*?applause.*?\]\s*$', '', transcript, flags=re.MULTILINE | re.IGNORECASE)
             # Remove any empty lines left after removals
             transcript = '\n'.join([line for line in transcript.split('\n') if line.strip()])
-            return transcript
+            # Remove any initial lines that are just titles, placeholders, or not real dialog
+            lines = transcript.split('\n')
+            filtered = []
+            for line in lines:
+                # Remove lines that are just 'Filing Talk', '---', or similar, or only speaker tag with no content
+                if re.match(r'^(ALEX:|JAMIE:)\s*(Filing Talk|---|—|-|)$', line.strip(), re.IGNORECASE):
+                    continue
+                # Remove lines that are just speaker tag and whitespace
+                if re.match(r'^(ALEX:|JAMIE:)\s*$', line.strip(), re.IGNORECASE):
+                    continue
+                filtered.append(line)
+            return '\n'.join(filtered)
         # ...
         # After you get the LLM output (e.g., 'transcript = ...')
         transcript = ""
