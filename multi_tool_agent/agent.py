@@ -682,144 +682,69 @@ class TTSAgent:
     @staticmethod
     def _naturalize_text(text, language='en-US'):
         import re
-        import locale
-        try:
-            from babel.numbers import format_decimal
-        except ImportError:
-            format_decimal = None
-        p = inflect.engine()
-        lang_key = language.split('-')[0]
-        # Helper to localize numbers
-        def localize_number(num_str):
-            try:
-                num = float(num_str.replace(',', ''))
-            except Exception:
-                return num_str
-            if lang_key == 'en':
-                return f"{num:,}"
-            if format_decimal:
-                try:
-                    return format_decimal(num, locale=language.replace('-', '_'))
-                except Exception:
-                    return str(num)
-            return str(num)
-        # Use num2words for large integer numbers with commas (e.g., $391,928,000) in all languages
         try:
             from num2words import num2words
         except ImportError:
             num2words = None
-        def number_to_words(match):
-            num_str = match.group(0).replace(',', '').replace('$', '')
+        lang_key = language.split('-')[0]
+
+        def n2w(num):
+            if num2words:
+                return num2words(num, lang='en')
+            return str(num)
+
+        # Currency normalization (apply first!)
+        def currency_to_words(match):
+            num_str = match.group(1).replace(',', '')
             try:
-                num = int(num_str)
-                if num2words:
-                    return num2words(num, lang=lang_key)
-                else:
-                    return match.group(0)
+                num = float(num_str)
             except Exception:
-                return match.group(0)
-        # Only replace large integer numbers with commas, not decimals or billions
-        text = re.sub(r'\$?\b(\d{1,3}(?:,\d{3})+)\b(?!\.?\d|\s*(billion|million|억|만|조|千|百|thousand|million|billion))',
-                      lambda m: ('$' if m.group(0).startswith('$') else '') + number_to_words(m), text)
-        if lang_key != 'en':
-            # Replace numbers with localized format
-            text = re.sub(r'\$([\d,.]+)', lambda m: '$' + localize_number(m.group(1)), text)
-            # Use num2words for number reading in all supported languages
-            try:
-                from num2words import num2words
-            except ImportError:
-                num2words = None
-            def decimal_to_local(match):
-                left = match.group(1)
-                right = match.group(2)
-                sep_map = {
-                    'ko': '점',
-                    'ja': '点',
-                    'zh': '点',
-                    'es': 'coma',
-                    'fr': 'virgule',
-                    'de': 'Komma',
-                    'en': 'point'
-                }
-                sep = sep_map.get(lang_key, 'point')
-                if num2words:
-                    # Use num2words for the integer part
-                    if left == '0':
-                        left_word = {
-                            'ko': '영',
-                            'ja': 'ゼロ',
-                            'zh': '零',
-                            'es': 'cero',
-                            'fr': 'zéro',
-                            'de': 'null',
-                            'en': 'zero'
-                        }.get(lang_key, 'zero')
-                    else:
-                        try:
-                            left_word = num2words(int(left), lang=lang_key)
-                        except Exception:
-                            left_word = left
-                    # Digit-by-digit for the decimal part
-                    try:
-                        right_word = ' '.join([num2words(int(d), lang=lang_key) for d in right])
-                    except Exception:
-                        right_word = ' '.join(list(right))
-                else:
-                    left_word = left
-                    right_word = ' '.join(list(right))
-                return f"{left_word} {sep} {right_word}"
-            text = re.sub(r'(?<![\d])(\d+)\.(\d+)(?![\d])', decimal_to_local, text)
-            text = re.sub(r'(?<![\w.])(\d{1,})(?![\w.])', lambda m: localize_number(m.group(1)), text)
+                num = 0
+            unit = match.group(2)
+            # For million/billion, use words
+            if unit:
+                unit = unit.lower()
+                if unit.startswith('b'):
+                    return f"{n2w(int(num))} billion dollars"
+                elif unit.startswith('m'):
+                    return f"{n2w(int(num))} million dollars"
+            # For plain numbers, keep as digits if decimal, else use words
+            if '.' in num_str:
+                return f"{num_str} dollars"
+            else:
+                return f"{n2w(int(num))} dollars"
+        text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
+
+        # Localize numbers for non-English (optional, can add your logic here)
+        # ...
+
         # Convert years like 2025 to 'twenty twenty-five' (English only)
-        if lang_key == 'en':
-            def year_to_words(match):
-                year = int(match.group())
-                if 2000 <= year <= 2099:
-                    first = 'twenty'
-                    second = str(year % 100)
-                    if second == '0':
-                        return first + ' hundred'
-                    elif len(second) == 1:
-                        second = 'oh ' + second
-                    return f"{first} {second}"
-                return str(year)
-            text = re.sub(r'20[0-9]{2}', year_to_words, text)
+        def year_to_words(match):
+            year = int(match.group())
+            if 2000 <= year <= 2099:
+                first = 'twenty'
+                second = str(year % 100)
+                if second == '0':
+                    return first + ' hundred'
+                elif len(second) == 1:
+                    second = 'oh ' + second
+                return f"{first} {second}"
+            return str(year)
+        text = re.sub(r'20[0-9]{2}', year_to_words, text)
+
         # Replace 10-Q and 10-K with 'ten Q' and 'ten K' (all languages)
         text = re.sub(r'10-([QK])', r'ten \1', text, flags=re.IGNORECASE)
-        # Convert decimals to words (English only)
-        if lang_key == 'en':
-            def decimal_to_words(match):
-                num = match.group(0)
-                left, right = num.split('.')
-                return f"{p.number_to_words(int(left))} point {p.number_to_words(int(right))}"
-            text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
-        # Convert currency and large numbers to words (English only)
-        if lang_key == 'en':
-            def currency_to_dollars(match):
-                num_str = match.group(1)
-                unit = match.group(2)
-                if unit:
-                    return f"{num_str} {unit.lower()} dollars"
-                return f"{num_str} dollars"
-            # Replace all $ amounts (with or without billion/million)
-            text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_dollars, text, flags=re.IGNORECASE)
+
+        # Convert decimals to words (optional, for non-currency)
+        def decimal_to_words(match):
+            num = match.group(0)
+            left, right = num.split('.')
+            return f"{n2w(int(left))} point {' '.join([n2w(int(d)) for d in right])}"
+        text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
+
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
-        # Remove markdown and extra formatting from speaker tags
-        text = re.sub(r'^[*\s]*ALEX[*\s]*:', 'ALEX:', text, flags=re.MULTILINE | re.IGNORECASE)
-        text = re.sub(r'^[*\s]*JAMIE[*\s]*:', 'JAMIE:', text, flags=re.MULTILINE | re.IGNORECASE)
-        # Ensure NVIDIA is read as 'Nvidia', not spelled out
-        text = re.sub(r'N[\- ]?V[\- ]?D[\- ]?I[\- ]?A', 'Nvidia', text, flags=re.IGNORECASE)
-        # General rule: collapse any all-caps, spaced, dashed, or dotted company name to its normal form
-        def collapse_spelled_company(match):
-            word = match.group(0)
-            # Remove spaces, dashes, dots, and make title case
-            return word.replace(' ', '').replace('-', '').replace('.', '').title()
-        # Match patterns like 'N V I D I A', 'A P P L E', 'M I C R O S O F T', etc.
-        text = re.sub(r'\b([A-Z](?:[\s\-\.][A-Z])+[A-Z])\b', collapse_spelled_company, text)
-        # Also replace all-caps 'NVIDIA' with 'Nvidia'
-        text = re.sub(r'\bNVIDIA\b', 'Nvidia', text, flags=re.IGNORECASE)
-        print(f"[TTSAgent] Processed text for TTS: {text}")
+
         return text
     
     @staticmethod
