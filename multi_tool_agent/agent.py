@@ -701,13 +701,19 @@ class TTSAgent:
             except Exception:
                 num = 0
             unit = match.group(2)
-            # For million/billion, use words
             if unit:
                 unit = unit.lower()
+                if '.' in num_str:
+                    left, right = num_str.split('.')
+                    left_words = n2w(int(left))
+                    right_words = ' '.join([n2w(int(d)) for d in right])
+                    num_words = f"{left_words} point {right_words}"
+                else:
+                    num_words = n2w(int(num))
                 if unit.startswith('b'):
-                    return f"{n2w(int(num))} billion dollars"
+                    return f"{num_words} billion dollars"
                 elif unit.startswith('m'):
-                    return f"{n2w(int(num))} million dollars"
+                    return f"{num_words} million dollars"
             # For plain numbers, keep as digits if decimal, else use words
             if '.' in num_str:
                 return f"{num_str} dollars"
@@ -735,12 +741,25 @@ class TTSAgent:
         # Replace 10-Q and 10-K with 'ten Q' and 'ten K' (all languages)
         text = re.sub(r'10-([QK])', r'ten \1', text, flags=re.IGNORECASE)
 
-        # Convert decimals to words (optional, for non-currency)
-        def decimal_to_words(match):
-            num = match.group(0)
-            left, right = num.split('.')
-            return f"{n2w(int(left))} point {' '.join([n2w(int(d)) for d in right])}"
-        text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
+        # Decimal normalization for non-English languages
+        if lang_key != 'en' and num2words:
+            sep_map = {
+                'ko': '점',
+                'ja': '点',
+                'zh': '点',
+                'es': 'coma',
+                'fr': 'virgule',
+                'de': 'Komma',
+                'en': 'point'
+            }
+            sep = sep_map.get(lang_key, 'point')
+            def decimal_to_local(match):
+                left = match.group(1)
+                right = match.group(2)
+                left_word = num2words(int(left), lang=lang_key) if num2words else left
+                right_word = ' '.join([num2words(int(d), lang=lang_key) if num2words else d for d in right])
+                return f"{left_word} {sep} {right_word}"
+            text = re.sub(r'(\d+)\.(\d+)', decimal_to_local, text)
 
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
