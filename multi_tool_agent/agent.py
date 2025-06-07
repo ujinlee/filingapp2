@@ -764,6 +764,15 @@ class TTSAgent:
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
 
+        if lang_key == 'en' and num2words:
+            def decimal_to_words(match):
+                num = match.group(0)
+                left, right = num.split('.')
+                left_words = num2words(int(left), lang='en')
+                right_words = num2words(int(right), lang='en')
+                return f"{left_words} point {right_words}"
+            text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
+
         return text
     
     @staticmethod
