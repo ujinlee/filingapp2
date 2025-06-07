@@ -431,7 +431,7 @@ class SummarizationAgent:
             text = soup.get_text(separator=' ', strip=True)
             text_lower = text.lower()
             # Try Item 7 first
-            mda_start = re.search(r"item\s*7[.:\-\s]+management[’'`s ]*discussion", text_lower)
+            mda_start = re.search(r"item\s*7[.:\-\s]+management['`s ]*discussion", text_lower)
             if not mda_start:
                 mda_start = re.search(r"item\s*7[.:\-\s]+", text_lower)
             mda_end = None
@@ -452,7 +452,7 @@ class SummarizationAgent:
                     print(f"[extract_mda_section] Fallback: Extracted between Item 7 and next Item 7A/8 (first 500 chars): {mda_section[:500]}")
                     return mda_section
             # If Item 7 not found, try Item 2
-            mda_start = re.search(r"item\s*2[.:\-\s]+management[’'`s ]*discussion", text_lower)
+            mda_start = re.search(r"item\s*2[.:\-\s]+management['`s ]*discussion", text_lower)
             if not mda_start:
                 mda_start = re.search(r"item\s*2[.:\-\s]+", text_lower)
             mda_end = None
@@ -795,22 +795,14 @@ class TTSAgent:
             text = re.sub(r'\b\d+\.\d+\b', decimal_to_words, text)
         # Convert currency and large numbers to words (English only)
         if lang_key == 'en':
-            def currency_to_words(match):
-                num_str = match.group(1).replace(',', '')
-                num_str = re.sub(r'[^\d.-]+$', '', num_str)
-                try:
-                    num = float(num_str)
-                except Exception:
-                    num = 0
+            def currency_to_dollars(match):
+                num_str = match.group(1)
                 unit = match.group(2)
                 if unit:
-                    unit = unit.lower()
-                    if unit.startswith('b'):
-                        return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} billion dollars"
-                    elif unit.startswith('m'):
-                        return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} million dollars"
-                return f"{p.number_to_words(int(num), andword='', zero='zero', group=1)} dollars"
-            text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_words, text, flags=re.IGNORECASE)
+                    return f"{num_str} {unit.lower()} dollars"
+                return f"{num_str} dollars"
+            # Replace all $ amounts (with or without billion/million)
+            text = re.sub(r'\$([\d,.]+)\s*(billion|million)?', currency_to_dollars, text, flags=re.IGNORECASE)
         # Always pronounce SEC as S-E-C
         text = re.sub(r'\bSEC\b', 'S-E-C', text)
         # Remove markdown and extra formatting from speaker tags
