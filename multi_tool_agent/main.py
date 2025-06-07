@@ -496,12 +496,11 @@ async def summarize_filing(request: SummarizeRequest):
         # Normalize speaker tags for the English transcript
         lines = [line for line in transcript.split('\n') if line.strip()]
         normalized_lines = []
+        speakers = ['ALEX', 'JAMIE']
         for i, line in enumerate(lines):
-            if line.strip().startswith('ALEX:') or line.strip().startswith('JAMIE:'):
-                normalized_lines.append(line.strip())
-            else:
-                tag = 'ALEX:' if i % 2 == 0 else 'JAMIE:'
-                normalized_lines.append(f"{tag} {line.strip()}")
+            # Remove any existing speaker tag and immediate self-intro
+            content = re.sub(r'^(ALEX:|JAMIE:)\s*(Alex:|Jamie:)?', '', line, flags=re.IGNORECASE).strip()
+            normalized_lines.append(f"{speakers[i % 2]}: {content}")
         transcript = '\n'.join(normalized_lines)
 
         if transcript:
@@ -526,8 +525,8 @@ async def summarize_filing(request: SummarizeRequest):
                 normalized_lines = []
                 speakers = ['ALEX', 'JAMIE']
                 for i, line in enumerate(lines):
-                    # Remove any existing speaker tag
-                    content = re.sub(r'^(ALEX:|JAMIE:)', '', line, flags=re.IGNORECASE).strip()
+                    # Remove any existing speaker tag and immediate self-intro
+                    content = re.sub(r'^(ALEX:|JAMIE:)\s*(Alex:|Jamie:)?', '', line, flags=re.IGNORECASE).strip()
                     normalized_lines.append(f"{speakers[i % 2]}: {content}")
                 transcript = '\n'.join(normalized_lines)
                 # Ensure 'Filing Talk' is always pronounced as '파일링 토크' in Korean transcript
