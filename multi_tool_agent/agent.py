@@ -708,7 +708,7 @@ class TTSAgent:
             sep = sep_map.get(lang_key, 'point')
             def decimal_to_local(match):
                 left = match.group(1)
-                right = match.group(2)
+                right = match.group(2)rint
                 left_word = num2words(int(left), lang=lang_key) if num2words else left
                 right_word = ' '.join([num2words(int(d), lang=lang_key) if num2words else d for d in right])
                 return f"{left_word} {sep} {right_word}"
@@ -1002,9 +1002,3 @@ def extract_xbrl_facts_with_arelle(xbrl_path_or_url):
 # print(f"[TTSAgent] Writing {len(audio_segments)} segments to file: {filepath}")
 # print(f"[TTSAgent] Audio file written: {filepath}, size: {os.path.getsize(filepath)} bytes")
 # print(f"[Timing] TTS synthesis for {language} took {elapsed:.2f} seconds")
-
-# Keep summary prints
-print(f"[XBRL] Extracted values: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
-print(f"[XBRL] Previous values: Revenue={revenue_prev}, Net Income={net_income_prev}, EPS={eps_prev}")
-print(f"[XBRL] Segment revenues: {segment_revenues}")
-print(f"[DEBUG] XBRL extracted: Revenue={revenue}, Net Income={net_income}, EPS={eps}")
