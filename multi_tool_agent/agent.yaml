@@ -1,0 +1,30 @@
+agents:
+  - id: summarizer
+    type: tool
+    class: SummarizationToolAgent
+  - id: translator
+    type: tool
+    class: TranslationToolAgent
+  - id: tts
+    type: tool
+    class: TTSToolAgent
+  - id: filing_podcast_pipeline
+    type: pipeline
+    class: FilingPodcastPipelineAgent
+    steps:
+      - id: summarize
+        agent: summarizer
+        input: filing_content
+        output: summary
+      - id: translate
+        agent: translator
+        input:
+          english_script: summary
+          target_language: target_language
+        output: translated
+      - id: tts
+        agent: tts
+        input:
+          text: translated
+          language: tts_language
+        output: audio_file 
