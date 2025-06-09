@@ -482,6 +482,7 @@ async def summarize_filing(request: SummarizeRequest):
             # Remove any initial lines that are just titles, placeholders, or not real dialog
             lines = transcript.split('\n')
             filtered = []
+            found_first_real = False
             for line in lines:
                 # Remove lines that are just 'Filing Talk', '---', or similar, or only speaker tag with no content
                 if re.match(r'^(ALEX:|JAMIE:)\s*(Filing Talk|---|—|-|)$', line.strip(), re.IGNORECASE):
@@ -489,7 +490,27 @@ async def summarize_filing(request: SummarizeRequest):
                 # Remove lines that are just speaker tag and whitespace
                 if re.match(r'^(ALEX:|JAMIE:)\s*$', line.strip(), re.IGNORECASE):
                     continue
-                filtered.append(line)
+                # Remove lines that are just bracketed stage directions (e.g., [Intro Music], [Music Fades])
+                if re.match(r'^\s*\[.*?\]\s*$', line.strip()):
+                    continue
+                # Remove lines that are just titles or non-dialogue at the very start
+                if not found_first_real:
+                    # Only keep if line starts with ALEX: or JAMIE: and has real content
+                    if re.match(r'^(ALEX:|JAMIE:)\s*.+', line.strip()):
+                        filtered.append(line)
+                        found_first_real = True
+                    else:
+                        continue
+                else:
+                    filtered.append(line)
+            # Ensure the first real line is always ALEX:
+            if filtered and not filtered[0].startswith('ALEX:'):
+                # If first line is JAMIE:, swap the first two lines if possible
+                if len(filtered) > 1 and filtered[1].startswith('ALEX:'):
+                    filtered[0], filtered[1] = filtered[1], filtered[0]
+                else:
+                    # Otherwise, force the first line to be ALEX:
+                    filtered[0] = re.sub(r'^(ALEX:|JAMIE:)', 'ALEX:', filtered[0])
             return '\n'.join(filtered)
         # ...
         # After you get the LLM output (e.g., 'transcript = ...')
