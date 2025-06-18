@@ -30,6 +30,8 @@ print("[DEBUG] openai module version:", getattr(openai, '__version__', 'unknown'
 print("[DEBUG] OPENAI_API_KEY is set:", bool(os.getenv("OPENAI_API_KEY")))
 import tiktoken
 import numpy as np
+import json
+from google.oauth2 import service_account
 
 SEC_USER_AGENT_EMAIL = os.getenv("SEC_USER_AGENT_EMAIL", "your-email@domain.com")
 if not SEC_USER_AGENT_EMAIL or SEC_USER_AGENT_EMAIL == "your-email@domain.com":
@@ -735,7 +737,13 @@ class TTSAgent:
         import re
         start_time = time.time()
         print(f"[TTSAgent] Starting synthesis for language: {language}")
-        client = texttospeech.TextToSpeechClient()
+        # Use JSON-in-env-var credentials if present
+        if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
+            creds_dict = json.loads(os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            client = texttospeech.TextToSpeechClient(credentials=credentials)
+        else:
+            client = texttospeech.TextToSpeechClient()
         text = TTSAgent._naturalize_text(text, language)
         if not text or not re.search(r'\w', text):
             print("[TTSAgent] Input text is empty or only punctuation/whitespace. Aborting TTS synthesis.")
