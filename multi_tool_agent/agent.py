@@ -9,6 +9,8 @@ logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
 from dotenv import load_dotenv
 load_dotenv()
 import os
+print("[DEBUG] GOOGLE_APPLICATION_CREDENTIALS:", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+print("[DEBUG] File exists:", os.path.exists(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")))
 print("GOOGLE_APPLICATION_CREDENTIALS:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 import requests
 import re
